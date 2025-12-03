@@ -85,123 +85,56 @@ export default function LandingPage() {
 
       <main className="mx-auto max-w-5xl px-4 pb-20 pt-10">
         {/* Hero */}
-        <section className="flex flex-col items-center gap-10 text-center lg:flex-row lg:items-stretch lg:justify-between lg:text-left">
-          {/* Copy side */}
-          <div className="max-w-xl space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              <span>AI powered brand studio for Instagram</span>
-            </div>
+        <section className="relative">
+          {/* Gradient banner container */}
+          <div className="relative overflow-hidden rounded-[40px] border border-slate-800 bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-slate-950 px-6 py-12 sm:px-10 sm:py-16">
+            {/* Soft glow accents */}
+            <div className="pointer-events-none absolute -left-32 -top-32 h-72 w-72 rounded-full bg-emerald-400/35 blur-3xl" />
+            <div className="pointer-events-none absolute -right-40 bottom-[-120px] h-80 w-80 rounded-full bg-sky-500/35 blur-3xl" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.35),transparent_55%)]" />
 
-            <h1 className="text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
-              Instagram feeds that finally
-              <span className="text-sky-400"> look like your brand.</span>
-            </h1>
-
-            <p className="text-sm text-slate-300 sm:text-base">
-              Flow Social turns your brand settings into a content engine.
-              Capture your voice and visuals once, then generate scroll stopping
-              captions and images that feel on brand every time you post.
-            </p>
-
-            <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-              <Link
-                href="/studio"
-                className="inline-flex items-center justify-center rounded-full bg-sky-500 px-5 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
-              >
-                Start free in the browser
-              </Link>
-              <span className="text-[11px] text-slate-400">
-                Free tier available · No credit card
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-4 pt-1 text-[11px] text-slate-400 lg:justify-start">
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                <span>Feeds that stay on brand</span>
+            <div className="relative flex flex-col items-center text-center sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/20 bg-slate-950/40 px-3 py-1 text-xs text-sky-50">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                <span>AI powered brand studio for Instagram</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                <span>Captions and images in one flow</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
-                <span>Built by a founder for founders</span>
-              </div>
-            </div>
-          </div>
 
-          {/* Visual side: overlapping feeds */}
-          <div className="relative w-full max-w-md lg:max-w-lg">
-            <div className="absolute -inset-8 rounded-[36px] bg-sky-500/15 blur-3xl" />
+              <h1 className="mt-5 max-w-3xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
+                Get brand content{" "}
+                <span className="text-sky-100">to power up your Instagram feed.</span>
+              </h1>
 
-            {/* Back phone */}
-            <div className="relative -right-4 top-6 hidden h-80 w-40 rounded-[28px] border border-slate-800 bg-slate-900/80 p-3 shadow-xl shadow-sky-500/20 sm:block lg:h-96 lg:w-48">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-sky-500 to-emerald-400" />
-                <div className="space-y-0.5 text-[10px]">
-                  <p className="font-semibold text-slate-100">@shopsharpjock</p>
-                  <p className="text-slate-400">Athlete apparel</p>
+              <p className="mt-4 max-w-2xl text-sm text-slate-100/80 sm:text-base">
+                Flow Social turns your brand settings into a content engine.
+                Capture your voice and visuals once, then generate scroll
+                stopping captions and images that feel on brand every post.
+              </p>
+
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+                <Link
+                  href="/studio"
+                  className="inline-flex items-center justify-center rounded-full bg-slate-950 px-6 py-2.5 text-sm font-medium text-sky-300 shadow-lg shadow-slate-950/40 ring-1 ring-slate-200/30 hover:bg-slate-900 hover:text-sky-100"
+                >
+                  Start free in the browser
+                </Link>
+                <span className="text-[11px] text-slate-100/80">
+                  Free tier available · No credit card
+                </span>
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-[11px] text-slate-100/80">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                  <span>Feeds that stay on brand</span>
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                {[0, 1, 2].map((row) => (
-                  <div key={row} className="grid grid-cols-3 gap-1.5">
-                    <div className="h-14 rounded-xl bg-gradient-to-br from-sky-500/70 to-emerald-400/70" />
-                    <div className="h-14 rounded-xl bg-slate-800" />
-                    <div className="h-14 rounded-xl bg-slate-800/80" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Front phone */}
-            <div className="relative h-80 w-44 rounded-[32px] border border-slate-700 bg-slate-950/90 p-3 shadow-2xl shadow-sky-500/30 sm:h-96 sm:w-52">
-              {/* Top bar */}
-              <div className="mb-3 flex items-center justify-between text-[10px]">
-                <div className="flex items-center gap-2">
-                  <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-sky-500 to-fuchsia-500" />
-                  <div>
-                    <p className="font-semibold text-slate-100">@yourbrandhere</p>
-                    <p className="text-[9px] text-slate-400">Founder brand</p>
-                  </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-300" />
+                  <span>Captions and images in one flow</span>
                 </div>
-                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[9px] text-slate-300">
-                  Generated in Flow Social
-                </span>
-              </div>
-
-              {/* Big post */}
-              <div className="mb-2 h-40 rounded-2xl bg-gradient-to-br from-sky-500 via-emerald-400 to-slate-900" />
-
-              {/* Caption snippet */}
-              <div className="space-y-1.5 rounded-2xl bg-slate-900/80 p-2.5">
-                <p className="text-[9px] font-semibold text-slate-200">
-                  Empty locker room before the game. Your brand colors on every detail.
-                </p>
-                <p className="text-[9px] leading-snug text-slate-400">
-                  When your feed looks like your brand, every post feels like a small launch.
-                  Flow Social helps you ship that feeling again and again.
-                </p>
-                <div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
-                  <span>❤️ 1,248</span>
-                  <span>•</span>
-                  <span>View caption and image in Studio</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
+                  <span>Built by a founder for founders</span>
                 </div>
-              </div>
-
-              {/* Bottom chips */}
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[9px]">
-                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
-                  Brand colors
-                </span>
-                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
-                  On voice captions
-                </span>
-                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
-                  People and product shots
-                </span>
               </div>
             </div>
           </div>
