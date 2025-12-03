@@ -1,67 +1,51 @@
-// app/api/stripe/create-checkout-session/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import Stripe from "stripe";
 
-import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { getPriceForPlan, type PlanName } from "@/lib/billing";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
-export async function POST(req: Request) {
+
+export async function POST(req: NextRequest) {
   try {
-    // ------------------------------------------
-    // 1) Parse and validate requested plan
-    // ------------------------------------------
-    const body = (await req.json()) as { plan?: PlanName };
-    const plan = body.plan;
+    const body = await req.json();
+    const plan = body.plan as "pro" | "studio_max" | undefined;
 
-    if (!plan || (plan !== "pro" && plan !== "studio_max")) {
+    if (!plan) {
+      return NextResponse.json({ error: "Missing plan." }, { status: 400 });
+    }
+
+    const priceId =
+      plan === "pro"
+        ? process.env.STRIPE_PRICE_PRO
+        : process.env.STRIPE_PRICE_STUDIO_MAX;
+
+    if (!priceId) {
       return NextResponse.json(
-        { error: "Invalid or missing plan in request." },
-        { status: 400 }
+        { error: "Stripe price is not configured for this plan." },
+        { status: 500 }
       );
     }
 
-    // ------------------------------------------
-    // 2) Resolve Stripe price for this plan
-    // ------------------------------------------
-    const priceId = getPriceForPlan(plan);
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://flowsociallive.vercel.app";
 
-    // Build a base URL for redirects
-    const host = req.headers.get("host") ?? "localhost:3000";
-    const proto = req.headers.get("x-forwarded-proto") ?? "http";
-    const origin =
-      process.env.NEXT_PUBLIC_SITE_URL ?? `${proto}://${host}`;
-
-    // ------------------------------------------
-    // 3) Create Stripe Checkout session
-    // ------------------------------------------
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      billing_address_collection: "auto",
-      // No customer_email here for now – Stripe will ask in checkout.
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
-      success_url: `${origin}/studio?checkout=success`,
-      cancel_url: `${origin}/?checkout=cancelled`,
-      metadata: {
-        plan,
-      },
+      success_url: `${siteUrl}/studio?checkout=success`,
+      cancel_url: `${siteUrl}/studio?checkout=cancelled`,
     });
 
-    if (!session.url) {
-      return NextResponse.json(
-        { error: "Stripe did not return a checkout URL." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ url: session.url });
-  } catch (err) {
-    console.error("Stripe checkout error", err);
+    return NextResponse.json({ url: session.url }, { status: 200 });
+  } catch (err: any) {
+    console.error("Error creating checkout session:", err);
     return NextResponse.json(
-      { error: "Could not start checkout. Please try again." },
+      { error: "Could not start checkout." },
       { status: 500 }
     );
   }
