@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 
 export default function LandingPage() {
   const [checkoutLoading, setCheckoutLoading] = useState<"pro" | "studio_max" | null>(null);
@@ -85,42 +84,46 @@ export default function LandingPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-20 pt-10">
-        {/* Hero + app preview */}
-        <section className="flex flex-col items-center gap-8 text-center">
-          <div className="max-w-2xl space-y-5">
+        {/* Hero */}
+        <section className="flex flex-col items-center gap-10 text-center lg:flex-row lg:items-stretch lg:justify-between lg:text-left">
+          {/* Copy side */}
+          <div className="max-w-xl space-y-5">
             <div className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               <span>AI powered brand studio for Instagram</span>
             </div>
 
             <h1 className="text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
-              On brand Instagram posts
-              <span className="text-sky-400"> without the content grind.</span>
+              Instagram feeds that finally
+              <span className="text-sky-400"> look like your brand.</span>
             </h1>
 
             <p className="text-sm text-slate-300 sm:text-base">
-              Flow Social turns your brand settings into a content engine. Capture
-              your brand once, then generate Instagram ready captions and images
-              that actually look and feel like you every post.
+              Flow Social turns your brand settings into a content engine.
+              Capture your voice and visuals once, then generate scroll stopping
+              captions and images that feel on brand every time you post.
             </p>
 
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
               <Link
                 href="/studio"
                 className="inline-flex items-center justify-center rounded-full bg-sky-500 px-5 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
               >
                 Start free in the browser
               </Link>
+              <span className="text-[11px] text-slate-400">
+                Free tier available · No credit card
+              </span>
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-4 pt-1 text-[11px] text-slate-400">
+            <div className="flex flex-wrap items-center justify-center gap-4 pt-1 text-[11px] text-slate-400 lg:justify-start">
               <div className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                <span>Brand aware captions and images</span>
+                <span>Feeds that stay on brand</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                <span>Works for any niche or product</span>
+                <span>Captions and images in one flow</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
@@ -129,91 +132,76 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Static app preview card */}
-          <div className="relative mt-4 w-full max-w-3xl">
-            <div className="absolute -inset-6 rounded-[32px] bg-sky-500/10 blur-3xl" />
-            <div className="relative rounded-[28px] border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-sky-500/20">
-              {/* Header row */}
-              <div className="mb-4 flex items-center justify-between">
-                <div className="text-left">
-                  <p className="text-xs font-medium text-slate-200">
-                    Brand Content Studio
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    Sharp Jock · Your Next Brand
-                  </p>
+          {/* Visual side: overlapping feeds */}
+          <div className="relative w-full max-w-md lg:max-w-lg">
+            <div className="absolute -inset-8 rounded-[36px] bg-sky-500/15 blur-3xl" />
+
+            {/* Back phone */}
+            <div className="relative -right-4 top-6 hidden h-80 w-40 rounded-[28px] border border-slate-800 bg-slate-900/80 p-3 shadow-xl shadow-sky-500/20 sm:block lg:h-96 lg:w-48">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-sky-500 to-emerald-400" />
+                <div className="space-y-0.5 text-[10px]">
+                  <p className="font-semibold text-slate-100">@shopsharpjock</p>
+                  <p className="text-slate-400">Athlete apparel</p>
                 </div>
-                <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] text-emerald-300">
-                  v0.2 · Prototype
+              </div>
+              <div className="space-y-1.5">
+                {[0, 1, 2].map((row) => (
+                  <div key={row} className="grid grid-cols-3 gap-1.5">
+                    <div className="h-14 rounded-xl bg-gradient-to-br from-sky-500/70 to-emerald-400/70" />
+                    <div className="h-14 rounded-xl bg-slate-800" />
+                    <div className="h-14 rounded-xl bg-slate-800/80" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Front phone */}
+            <div className="relative h-80 w-44 rounded-[32px] border border-slate-700 bg-slate-950/90 p-3 shadow-2xl shadow-sky-500/30 sm:h-96 sm:w-52">
+              {/* Top bar */}
+              <div className="mb-3 flex items-center justify-between text-[10px]">
+                <div className="flex items-center gap-2">
+                  <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-sky-500 to-fuchsia-500" />
+                  <div>
+                    <p className="font-semibold text-slate-100">@yourbrandhere</p>
+                    <p className="text-[9px] text-slate-400">Founder brand</p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[9px] text-slate-300">
+                  Generated in Flow Social
                 </span>
               </div>
 
-              {/* Prompt */}
-              <div className="mb-3 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-left">
-                <p className="mb-1 text-[10px] font-semibold text-slate-400">
-                  DESCRIBE WHAT YOU WANT TO POST
+              {/* Big post */}
+              <div className="mb-2 h-40 rounded-2xl bg-gradient-to-br from-sky-500 via-emerald-400 to-slate-900" />
+
+              {/* Caption snippet */}
+              <div className="space-y-1.5 rounded-2xl bg-slate-900/80 p-2.5">
+                <p className="text-[9px] font-semibold text-slate-200">
+                  Empty locker room before the game. Your brand colors on every detail.
                 </p>
-                <p className="text-xs text-slate-200">
-                  Empty locker room with a Sharp Jock beanie on the bench.
+                <p className="text-[9px] leading-snug text-slate-400">
+                  When your feed looks like your brand, every post feels like a small launch.
+                  Flow Social helps you ship that feeling again and again.
                 </p>
+                <div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
+                  <span>❤️ 1,248</span>
+                  <span>•</span>
+                  <span>View caption and image in Studio</span>
+                </div>
               </div>
 
-              {/* Buttons row */}
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-full bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950"
-                >
-                  Generate caption and image
-                </button>
-                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] text-slate-200">
-                  Brand settings saved
+              {/* Bottom chips */}
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[9px]">
+                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
+                  Brand colors
                 </span>
-              </div>
-
-              {/* Caption + screenshot */}
-              <div className="grid items-stretch gap-4 md:grid-cols-[1.4fr,1fr]">
-                {/* Caption */}
-                <div className="flex flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900 px-3 py-3 text-left">
-                  <div className="mb-2 inline-flex max-w-full rounded-full bg-emerald-500 px-3 py-1 text-[11px] text-slate-950">
-                    Sharp Jock · Sustainability · Performance
-                  </div>
-                  <p className="text-xs leading-relaxed text-slate-100">
-                    Quiet moments like this power the next win. When you gear up
-                    with Sharp Jock, you are not just chasing performance, you
-                    are standing up for the planet and the animals you share it
-                    with. Train hard, tread light, and own your journey.
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="rounded-full border border-slate-600 bg-slate-800 px-3.5 py-1.5 text-[11px] text-slate-100 hover:bg-slate-700"
-                    >
-                      Copy caption
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full border border-slate-600 bg-slate-800 px-3.5 py-1.5 text-[11px] text-slate-100 hover:bg-slate-700"
-                    >
-                      Download image
-                    </button>
-                  </div>
-                </div>
-
-                {/* Screenshot preview */}
-                <div className="flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/70 p-3">
-                  <div className="w-full max-w-[360px] overflow-hidden rounded-3xl border border-slate-700 bg-slate-900/80">
-                    <Image
-                      src="/beanie.png"
-                      alt="FlowSocial Brand Studio ready for a new post"
-                      width={720}
-                      height={480}
-                      className="h-auto w-full object-cover"
-                      priority
-                    />
-                  </div>
-                </div>
+                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
+                  On voice captions
+                </span>
+                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-slate-300">
+                  People and product shots
+                </span>
               </div>
             </div>
           </div>
