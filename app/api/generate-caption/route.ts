@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getUsageInfo } from "@/lib/usage";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -15,6 +16,42 @@ type BrandSettings = {
 
 export async function POST(req: Request) {
   try {
+    // --------------------------------------------
+    // Billing plan and monthly usage check
+    // --------------------------------------------
+    let usage = null;
+
+    try {
+      // Note: this may return null if there is no auth session
+      usage = await getUsageInfo();
+    } catch (e) {
+      console.error("getUsageInfo threw an error:", e);
+    }
+
+    if (usage) {
+      const { plan, maxPostsPerMonth, postsThisMonth } = usage;
+
+      if (maxPostsPerMonth !== null && postsThisMonth >= maxPostsPerMonth) {
+        return NextResponse.json(
+          {
+            error:
+              "You have reached your monthly post limit for your plan.",
+            code: "LIMIT_REACHED",
+            plan,
+          },
+          { status: 402 }
+        );
+      }
+    } else {
+      // Dev mode: if we cannot read usage (no session), do NOT block
+      console.warn(
+        "generate-caption: usage info was null, skipping plan enforcement for this request."
+      );
+    }
+
+    // --------------------------------------------
+    // Existing caption + image-prompt logic
+    // --------------------------------------------
     const body = await req.json();
     const userPrompt: string = body.prompt || "";
     const brand: BrandSettings = body.brandSettings || {};
