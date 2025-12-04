@@ -103,6 +103,58 @@ export default function Page() {
     };
   }, []);
 
+  // Ensure the user has a profile row with a default free plan
+useEffect(() => {
+  const ensureProfile = async () => {
+    if (!user) return;
+
+    try {
+      const supabase = supabaseBrowser;
+
+      // 1) Check if profile already exists
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error && error.code !== "PGRST116") {
+        console.error("Error checking profile:", error);
+        return;
+      }
+
+      if (data) {
+        // Profile already exists, nothing to do
+        return;
+      }
+
+      // 2) Create a new profile with default free plan
+      const { error: insertError } = await supabase.from("profiles").insert([
+        {
+          id: user.id,
+          email: user.email ?? null,
+          plan: "free",
+          billing_plan: "free",
+          stripe_customer_id: null,
+          stripe_subscription_id: null,
+          subscription_status: "inactive",
+        },
+      ]);
+
+      if (insertError) {
+        console.error("Error creating profile:", insertError);
+      } else {
+        console.log("Created default profile for user", user.id);
+      }
+    } catch (err) {
+      console.error("ensureProfile exception:", err);
+    }
+  };
+
+  ensureProfile();
+}, [user]);
+
+
   // Load brand for current user
   useEffect(() => {
     const loadBrandForUser = async () => {
@@ -799,8 +851,7 @@ if (!user) {
 
         <p className="text-[11px] text-slate-500 text-center">
           New here or already subscribed, it is the same flow. Use the same
-          email every time and we will email you a one time login link so you
-          come back to your saved brands and posts.
+          email every time and we will email you a login link.
         </p>
       </div>
     </div>
