@@ -123,7 +123,7 @@ export default function LandingPage() {
             href="/studio"
             className="inline-flex items-center justify-center rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-black/40 ring-1 ring-black/40 hover:bg-black/80"
           >
-            Start free in the browser
+            Start creating content
           </Link>
 
           {/* Secondary CTA: soft-white pill */}
@@ -325,11 +325,10 @@ export default function LandingPage() {
 
           <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-900/70 px-5 py-5 text-center">
             <p className="text-sm font-medium text-slate-100">
-              Ready to see how your brand looks inside the studio?
+              Ready to see how your brand looks in the studio?
             </p>
             <p className="mt-1 text-xs text-slate-300">
-              Set up your first brand in a few minutes and generate your first
-              post today.
+              Set up your brand and create content in minutes.
             </p>
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
               <Link
