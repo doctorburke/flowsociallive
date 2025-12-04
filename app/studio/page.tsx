@@ -80,6 +80,7 @@ export default function Page() {
   const [authEmail, setAuthEmail] = useState("");
   const [authStatus, setAuthStatus] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [hasSentMagicLink, setHasSentMagicLink] = useState(false);
 
   // Posts history state
   const [posts, setPosts] = useState<StudioPost[]>([]);
@@ -347,7 +348,7 @@ useEffect(() => {
     router.replace(newUrl);
   }, [searchParams, router]);
 
-  async function handleLogin(e: React.FormEvent) {
+    async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setAuthStatus(null);
     setAuthLoading(true);
@@ -357,31 +358,46 @@ useEffect(() => {
       if (!email) {
         setAuthStatus("Please enter an email address.");
         setAuthLoading(false);
+        setHasSentMagicLink(false);
         return;
       }
 
       const { error } = await supabaseBrowser.auth.signInWithOtp({
-  email,
-  options: {
-    emailRedirectTo: `${window.location.origin}/studio`,
-  },
-});
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/studio`,
+        },
+      });
 
       if (error) {
         console.error(error);
-        setAuthStatus("Could not send login link. Please try again.");
+        const msg = (error.message || "").toLowerCase();
+
+        // Treat rate limit as "you already have a link"
+        if (msg.includes("rate") && msg.includes("limit")) {
+          setAuthStatus(
+            "Magic link already sent. Check your inbox or try again in a minute."
+          );
+          setHasSentMagicLink(true);
+        } else {
+          setAuthStatus("Could not send login link. Please try again.");
+          setHasSentMagicLink(false);
+        }
       } else {
         setAuthStatus(
-          "Magic link sent. Check your inbox and open the link to log in."
+          "Magic link sent. Check your inbox and open the link on this device to log in."
         );
+        setHasSentMagicLink(true);
       }
     } catch (err) {
       console.error(err);
       setAuthStatus("Something went wrong. Please try again.");
+      setHasSentMagicLink(false);
     } finally {
       setAuthLoading(false);
     }
   }
+
 
   async function handleLogout() {
     await supabaseBrowser.auth.signOut();
@@ -905,20 +921,29 @@ if (!user) {
               className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
               placeholder="you@example.com"
               value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-            />
+              onChange={(e) => {
+    setAuthEmail(e.target.value);
+    setAuthStatus(null);
+    setHasSentMagicLink(false);
+  }}
+/>
           </div>
           <button
-            type="submit"
-            disabled={authLoading}
-            className={`w-full rounded-full px-4 py-2 text-sm font-medium ${
-              authLoading
-                ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
-                : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-            }`}
-          >
-            {authLoading ? "Sending magic link..." : "Send magic link"}
-          </button>
+  type="submit"
+  disabled={authLoading || hasSentMagicLink}
+  className={`w-full rounded-full px-4 py-2 text-sm font-medium ${
+    authLoading || hasSentMagicLink
+      ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
+      : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+  }`}
+>
+  {authLoading
+    ? "Sending magic link..."
+    : hasSentMagicLink
+    ? "Magic link sent"
+    : "Send magic link"}
+</button>
+
         </form>
 
         {authStatus && (
