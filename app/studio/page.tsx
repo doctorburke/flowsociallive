@@ -235,11 +235,11 @@ export default function Page() {
       }
 
       const { error } = await supabaseBrowser.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
+  email,
+  options: {
+    emailRedirectTo: `${window.location.origin}/studio`,
+  },
+});
 
       if (error) {
         console.error(error);
@@ -755,55 +755,58 @@ Hard rules:
   }
 
   // If no user logged in
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-slate-900 rounded-3xl p-6 border border-slate-700 space-y-4">
-          <h1 className="text-xl font-semibold text-center">
-            Brand Content Studio
-          </h1>
-          <p className="text-sm text-slate-400 text-center">
-            Log in with your email to start saving brand settings and posts.
-          </p>
+if (!user) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-slate-900 rounded-3xl p-6 border border-slate-700 space-y-4">
+        <h1 className="text-xl font-semibold text-center">
+          Brand Content Studio
+        </h1>
+        <p className="text-sm text-slate-400 text-center">
+          Enter your email to create your account or log back in. We will send
+          you a secure magic link.
+        </p>
 
-          <form onSubmit={handleLogin} className="space-y-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">
-                EMAIL
-              </label>
-              <input
-                type="email"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                placeholder="you@example.com"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={authLoading}
-              className={`w-full rounded-full px-4 py-2 text-sm font-medium ${
-                authLoading
-                  ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
-                  : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-              }`}
-            >
-              {authLoading ? "Sending link..." : "Send login link"}
-            </button>
-          </form>
+        <form onSubmit={handleLogin} className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">
+              EMAIL
+            </label>
+            <input
+              type="email"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
+              placeholder="you@example.com"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={authLoading}
+            className={`w-full rounded-full px-4 py-2 text-sm font-medium ${
+              authLoading
+                ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
+                : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+            }`}
+          >
+            {authLoading ? "Sending magic link..." : "Send magic link"}
+          </button>
+        </form>
 
-          {authStatus && (
-            <p className="text-xs text-slate-300 text-center">{authStatus}</p>
-          )}
+        {authStatus && (
+          <p className="text-xs text-slate-300 text-center">{authStatus}</p>
+        )}
 
-          <p className="text-[11px] text-slate-500 text-center">
-            You will receive a magic link from Supabase. Open it and you will be
-            redirected back here already logged in.
-          </p>
-        </div>
+        <p className="text-[11px] text-slate-500 text-center">
+          New here or already subscribed, it is the same flow. Use the same
+          email every time and we will email you a one time login link so you
+          come back to your saved brands and posts.
+        </p>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
 
   // Logged in view
   return (
