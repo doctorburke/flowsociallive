@@ -71,7 +71,8 @@ export async function getUsageInfo(): Promise<UsageInfo | null> {
 
   const brandsCount = brandsCountRaw ?? 0;
 
-  // 4) Count posts in current calendar month
+  // 4) Posts used this month (from usage_stats, with safe fallback)
+
   const now = new Date();
   const monthStart = new Date(
     now.getFullYear(),
@@ -82,18 +83,45 @@ export async function getUsageInfo(): Promise<UsageInfo | null> {
     0,
     0
   );
+  const periodStart = monthStart.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
-  const { count: postsCountRaw, error: postsError } = await supabase
-    .from("posts")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gte("created_at", monthStart.toISOString());
+  let postsThisMonth = 0;
 
-  if (postsError) {
-    console.error("getUsageInfo posts count error", postsError);
+  try {
+    // Preferred: read from usage_stats table
+    const { data: usageRow, error: usageError } = await supabase
+      .from("usage_stats")
+      .select("posts_used")
+      .eq("user_id", user.id)
+      .eq("period_start", periodStart)
+      .maybeSingle();
+
+    if (usageError && (usageError as any).code !== "PGRST116") {
+      console.error("getUsageInfo usage_stats error", usageError);
+    }
+
+    if (usageRow && typeof usageRow.posts_used === "number") {
+      postsThisMonth = usageRow.posts_used;
+    } else {
+      // No row for this period means zero usage so far
+      postsThisMonth = 0;
+    }
+  } catch (err) {
+    console.error("getUsageInfo usage_stats unexpected error", err);
+
+    // Fallback: approximate by counting posts in this calendar month
+    const { count: postsCountRaw, error: postsError } = await supabase
+      .from("posts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", monthStart.toISOString());
+
+    if (postsError) {
+      console.error("getUsageInfo posts fallback error", postsError);
+    }
+
+    postsThisMonth = postsCountRaw ?? 0;
   }
-
-  const postsThisMonth = postsCountRaw ?? 0;
 
   return {
     plan,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { getUsageInfo } from "@/lib/usage";
+import { createClient } from "@supabase/supabase-js";
+import { checkAndIncrementPostUsage } from "@/lib/usageServer";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -17,44 +18,54 @@ type BrandSettings = {
 export async function POST(req: Request) {
   try {
     // --------------------------------------------
-    // Billing plan and monthly usage check
+    // Read request body once
     // --------------------------------------------
-    let usage = null;
+    const body = await req.json();
+    const userPrompt: string = body.prompt || "";
+    const brand: BrandSettings = body.brandSettings || {};
+    const userId: string | undefined = body.userId || undefined;
 
-    try {
-      // Note: this may return null if there is no auth session
-      usage = await getUsageInfo();
-    } catch (e) {
-      console.error("getUsageInfo threw an error:", e);
-    }
+    // --------------------------------------------
+    // Usage enforcement: only if we have userId
+    // --------------------------------------------
+    if (userId) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (usage) {
-      const { plan, maxPostsPerMonth, postsThisMonth } = usage;
+      if (supabaseUrl && serviceRoleKey) {
+        const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-      if (maxPostsPerMonth !== null && postsThisMonth >= maxPostsPerMonth) {
-        return NextResponse.json(
-          {
-            error:
-              "You have reached your monthly post limit for your plan.",
-            code: "LIMIT_REACHED",
-            plan,
-          },
-          { status: 402 }
+        const usageCheck = await checkAndIncrementPostUsage(supabase, userId);
+
+        if (!usageCheck.allowed) {
+          return NextResponse.json(
+            {
+              error:
+                usageCheck.reason ||
+                "You have reached your monthly post limit for your plan.",
+              code: "LIMIT_REACHED",
+              plan: usageCheck.plan,
+              used: usageCheck.used,
+              limit: usageCheck.limit,
+              remaining: usageCheck.remaining,
+            },
+            { status: 402 }
+          );
+        }
+      } else {
+        console.warn(
+          "generate-caption: SUPABASE_SERVICE_ROLE_KEY or URL missing, skipping usage enforcement."
         );
       }
     } else {
-      // Dev mode: if we cannot read usage (no session), do NOT block
       console.warn(
-        "generate-caption: usage info was null, skipping plan enforcement for this request."
+        "generate-caption: no userId in request body, skipping usage enforcement."
       );
     }
 
     // --------------------------------------------
     // Existing caption + image-prompt logic
     // --------------------------------------------
-    const body = await req.json();
-    const userPrompt: string = body.prompt || "";
-    const brand: BrandSettings = body.brandSettings || {};
 
     const brandName = brand.brandName || "this brand";
     const industry = brand.industry || "consumer brand";

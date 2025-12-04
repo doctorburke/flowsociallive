@@ -59,9 +59,13 @@ export default function LandingPage() {
       <header className="border-b border-slate-800/70">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-emerald-400 text-sm font-semibold">
-              FS
-            </div>
+            <div
+  className="flex h-8 w-8 items-center justify-center rounded-xl text-sm font-semibold"
+  style={{ backgroundColor: "#0EA5E9" }}
+>
+  FS
+</div>
+
             <span className="text-sm font-semibold tracking-wide">
               Flow Social
             </span>
@@ -84,61 +88,56 @@ export default function LandingPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-20 pt-10">
-        {/* Hero */}
-        <section className="relative">
-          {/* Gradient banner container */}
-          <div className="relative overflow-hidden rounded-[40px] border border-slate-800 bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-slate-950 px-6 py-12 sm:px-10 sm:py-16">
-            {/* Soft glow accents */}
-            <div className="pointer-events-none absolute -left-32 -top-32 h-72 w-72 rounded-full bg-emerald-400/35 blur-3xl" />
-            <div className="pointer-events-none absolute -right-40 bottom-[-120px] h-80 w-80 rounded-full bg-sky-500/35 blur-3xl" />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.35),transparent_55%)]" />
+  {/* Hero */}
+  <section className="relative">
+    {/* Solid sky-500 banner container */}
+    <div
+      className="relative overflow-hidden rounded-[40px] border border-slate-800 px-6 py-12 sm:px-10 sm:py-16"
+      style={{ backgroundColor: "#0EA5E9" }} // sky-500 blue
+    >
+      <div className="relative flex flex-col items-center text-center sm:items-center">
 
-            <div className="relative flex flex-col items-center text-center sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/20 bg-slate-950/40 px-3 py-1 text-xs text-sky-50">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                <span>AI powered brand studio for Instagram</span>
-              </div>
+        {/* Small Badge */}
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-3 py-1 text-xs text-white">
+          <span className="h-1.5 w-1.5 rounded-full bg-white" />
+          <span>AI powered brand studio for Instagram</span>
+        </div>
 
-              <h1 className="mt-5 max-w-3xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-5xl">
-                Get brand content{" "}
-                <span className="text-sky-100">to power up your Instagram feed.</span>
-              </h1>
+        {/* Title */}
+        <h1 className="mt-5 max-w-3xl text-3xl font-semibold leading-tight text-white sm:text-4xl lg:text-5xl">
+          Create content in seconds{" "}
+          <span className="text-white"></span>
+        </h1>
 
-              <p className="mt-4 max-w-2xl text-sm text-slate-100/80 sm:text-base">
-                Flow Social turns your brand settings into a content engine.
-                Capture your voice and visuals once, then generate scroll
-                stopping captions and images that feel on brand every post.
-              </p>
+        {/* Subtext */}
+        <p className="mt-4 max-w-2xl text-sm text-white/90 sm:text-base">
+          Flow Social turns your brand settings into a content engine.
+          Generate scroll stopping captions and images that feel on brand every post.
+        </p>
 
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-                <Link
-                  href="/studio"
-                  className="inline-flex items-center justify-center rounded-full bg-slate-950 px-6 py-2.5 text-sm font-medium text-sky-300 shadow-lg shadow-slate-950/40 ring-1 ring-slate-200/30 hover:bg-slate-900 hover:text-sky-100"
-                >
-                  Start free in the browser
-                </Link>
-                <span className="text-[11px] text-slate-100/80">
-                  Free tier available · No credit card
-                </span>
-              </div>
+        {/* Buttons */}
+        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          
+          {/* Primary CTA: black button */}
+          <Link
+            href="/studio"
+            className="inline-flex items-center justify-center rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-black/40 ring-1 ring-black/40 hover:bg-black/80"
+          >
+            Start free in the browser
+          </Link>
 
-              <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-[11px] text-slate-100/80">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                  <span>Feeds that stay on brand</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-sky-300" />
-                  <span>Captions and images in one flow</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
-                  <span>Built by a founder for founders</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+          {/* Secondary CTA: soft-white pill */}
+          <span className="inline-flex items-center rounded-full bg-white/20 px-4 py-2 text-[11px] font-medium text-white/90 backdrop-blur hover:bg-white/30">
+            Free tier available · No credit card
+          </span>
+        </div>
+
+        {/* Spacer to maintain same container height */}
+<div className="mt-6 h-4" />
+
+        </div>
+      </div>
+  </section>
 
         {/* Why FlowSocial */}
         <section className="mt-16 space-y-6 text-center">

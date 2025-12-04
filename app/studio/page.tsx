@@ -442,6 +442,7 @@ export default function Page() {
         body: JSON.stringify({
           prompt: userPrompt,
           brandSettings,
+          userId: user?.id,
         }),
       });
 
