@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabaseBrowser } from "../../lib/supabaseClient";
@@ -166,66 +166,67 @@ useEffect(() => {
   ensureProfile();
 }, [user]);
 
-  // Load current plan and monthly usage for this user
-  useEffect(() => {
-    const loadUsage = async () => {
-      if (!user) {
-        setUsageInfo(null);
-        return;
+    // Load current plan and monthly usage for this user
+  const refreshUsage = useCallback(async () => {
+    if (!user) {
+      setUsageInfo(null);
+      return;
+    }
+
+    try {
+      setUsageLoading(true);
+      const supabase = supabaseBrowser;
+
+      // 1) Get the user's plan from profiles
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("plan")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError && profileError.code !== "PGRST116") {
+        console.error("Error loading profile plan:", profileError);
       }
 
-      try {
-        setUsageLoading(true);
-        const supabase = supabaseBrowser;
+      const planRaw = (profile?.plan as string | null) ?? "free";
+      const plan =
+        planRaw === "pro" || planRaw === "studio_max" ? planRaw : "free";
 
-        // 1) Get the user's plan from profiles
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("plan")
-          .eq("id", user.id)
-          .maybeSingle();
+      const maxPostsPerMonth = getPlanPostLimit(plan);
 
-        if (profileError && profileError.code !== "PGRST116") {
-          console.error("Error loading profile plan:", profileError);
-        }
+      // 2) Get current period usage from usage_stats
+      const periodStart = getCurrentPeriodStart(new Date());
 
-        const planRaw = (profile?.plan as string | null) ?? "free";
-        const plan =
-          planRaw === "pro" || planRaw === "studio_max" ? planRaw : "free";
+      const { data: usageRow, error: usageError } = await supabase
+        .from("usage_stats")
+        .select("posts_used")
+        .eq("user_id", user.id)
+        .eq("period_start", periodStart)
+        .maybeSingle();
 
-        const maxPostsPerMonth = getPlanPostLimit(plan);
-
-        // 2) Get current period usage from usage_stats
-        const periodStart = getCurrentPeriodStart(new Date());
-
-        const { data: usageRow, error: usageError } = await supabase
-          .from("usage_stats")
-          .select("posts_used")
-          .eq("user_id", user.id)
-          .eq("period_start", periodStart)
-          .maybeSingle();
-
-        if (usageError && usageError.code !== "PGRST116") {
-          console.error("Error loading usage stats:", usageError);
-        }
-
-        const postsUsedThisMonth = usageRow?.posts_used ?? 0;
-
-        setUsageInfo({
-          plan,
-          maxPostsPerMonth,
-          postsUsedThisMonth,
-        });
-      } catch (err) {
-        console.error("Unexpected error loading usage:", err);
-        setUsageInfo(null);
-      } finally {
-        setUsageLoading(false);
+      if (usageError && usageError.code !== "PGRST116") {
+        console.error("Error loading usage stats:", usageError);
       }
-    };
 
-    loadUsage();
+      const postsUsedThisMonth = usageRow?.posts_used ?? 0;
+
+      setUsageInfo({
+        plan,
+        maxPostsPerMonth,
+        postsUsedThisMonth,
+      });
+    } catch (err) {
+      console.error("Unexpected error loading usage:", err);
+      setUsageInfo(null);
+    } finally {
+      setUsageLoading(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    refreshUsage();
+  }, [refreshUsage]);
+
 
 
   // Load brand for current user
@@ -759,11 +760,13 @@ Hard rules:
               },
             ]);
 
-          if (postError) {
+                    if (postError) {
             console.error("Error saving post:", postError);
           } else {
             loadPosts();
+            await refreshUsage();
           }
+
         }
       } catch (postErr) {
         console.error("Unexpected error saving post:", postErr);
@@ -923,7 +926,7 @@ if (!user) {
         )}
 
         <p className="text-[11px] text-slate-500 text-center">
-          New here or already subscribed, it is the same flow. We will email you a login link.
+          New here or already subscribed, we will email you a login link.
         </p>
       </div>
     </div>
