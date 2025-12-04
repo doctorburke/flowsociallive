@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabaseBrowser } from "../../lib/supabaseClient";
+import { getPlanPostLimit, getCurrentPeriodStart } from "@/lib/planLimits";
+
 
 type BrandSettings = {
   brandName: string;
@@ -40,6 +42,12 @@ type StudioPost = {
   image_url: string | null;
   prompt_used: string | null;
   created_at: string;
+};
+
+type PlanUsageInfo = {
+  plan: "free" | "pro" | "studio_max";
+  maxPostsPerMonth: number | null;
+  postsUsedThisMonth: number;
 };
 
 type PromptHumanAnalysis = {
@@ -82,6 +90,10 @@ export default function Page() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+    // Usage and plan state
+  const [usageInfo, setUsageInfo] = useState<PlanUsageInfo | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+
 
   // Load user on mount and subscribe to auth changes
   useEffect(() => {
@@ -153,6 +165,67 @@ useEffect(() => {
 
   ensureProfile();
 }, [user]);
+
+  // Load current plan and monthly usage for this user
+  useEffect(() => {
+    const loadUsage = async () => {
+      if (!user) {
+        setUsageInfo(null);
+        return;
+      }
+
+      try {
+        setUsageLoading(true);
+        const supabase = supabaseBrowser;
+
+        // 1) Get the user's plan from profiles
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("plan")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileError && profileError.code !== "PGRST116") {
+          console.error("Error loading profile plan:", profileError);
+        }
+
+        const planRaw = (profile?.plan as string | null) ?? "free";
+        const plan =
+          planRaw === "pro" || planRaw === "studio_max" ? planRaw : "free";
+
+        const maxPostsPerMonth = getPlanPostLimit(plan);
+
+        // 2) Get current period usage from usage_stats
+        const periodStart = getCurrentPeriodStart(new Date());
+
+        const { data: usageRow, error: usageError } = await supabase
+          .from("usage_stats")
+          .select("posts_used")
+          .eq("user_id", user.id)
+          .eq("period_start", periodStart)
+          .maybeSingle();
+
+        if (usageError && usageError.code !== "PGRST116") {
+          console.error("Error loading usage stats:", usageError);
+        }
+
+        const postsUsedThisMonth = usageRow?.posts_used ?? 0;
+
+        setUsageInfo({
+          plan,
+          maxPostsPerMonth,
+          postsUsedThisMonth,
+        });
+      } catch (err) {
+        console.error("Unexpected error loading usage:", err);
+        setUsageInfo(null);
+      } finally {
+        setUsageLoading(false);
+      }
+    };
+
+    loadUsage();
+  }, [user]);
 
 
   // Load brand for current user
@@ -850,8 +923,7 @@ if (!user) {
         )}
 
         <p className="text-[11px] text-slate-500 text-center">
-          New here or already subscribed, it is the same flow. Use the same
-          email every time and we will email you a login link.
+          New here or already subscribed, it is the same flow. We will email you a login link.
         </p>
       </div>
     </div>
@@ -863,7 +935,7 @@ if (!user) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-4 py-10">
       <div className="w-full max-w-3xl space-y-6">
-        {/* Header */}
+                {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">Brand Content Studio</h1>
@@ -872,33 +944,72 @@ if (!user) {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="flex flex-col items-end gap-1 sm:items-end">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Link
+                href="/#pricing"
+                className="inline-flex items-center justify-center rounded-full border border-emerald-500 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
+              >
+                Pricing and plans
+              </Link>
 
-            <Link
-              href="/#pricing"
-              className="inline-flex items-center justify-center rounded-full border border-emerald-500 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
-            >
-              Pricing and plans
-            </Link>
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-800 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-700"
+              >
+                <span className="mr-1">Brand Settings</span>
+                <span>⚙️</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setShowSettings(true)}
-              className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-800 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-700"
-            >
-              <span className="mr-1">Brand Settings</span>
-              <span>⚙️</span>
-            </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
+              >
+                Log out
+              </button>
+            </div>
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
-            >
-              Log out
-            </button>
+            {/* Plan and usage line */}
+            <div className="mt-1">
+              {usageLoading && !usageInfo && (
+                <p className="text-[11px] text-slate-500">
+                  Loading your plan and usage...
+                </p>
+              )}
+              {!usageLoading && usageInfo && (
+                <p className="text-[11px] text-slate-400 text-right">
+                  {usageInfo.maxPostsPerMonth === null ? (
+                    <>
+                      Plan:{" "}
+                      {usageInfo.plan === "pro"
+                        ? "Pro"
+                        : usageInfo.plan === "studio_max"
+                        ? "Studio Max"
+                        : "Free"}
+                      {" - "}
+                      {usageInfo.postsUsedThisMonth} posts created this month
+                    </>
+                  ) : (
+                    <>
+                      Plan:{" "}
+                      {usageInfo.plan === "pro"
+                        ? "Pro"
+                        : usageInfo.plan === "studio_max"
+                        ? "Studio Max"
+                        : "Free"}
+                      {" - "}
+                      {usageInfo.postsUsedThisMonth} of{" "}
+                      {usageInfo.maxPostsPerMonth} posts used this month
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
         </div>
+
 
         {/* Stripe checkout banner */}
         {checkoutNotice && (
