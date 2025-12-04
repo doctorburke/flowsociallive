@@ -262,6 +262,13 @@ export default function LandingPage() {
             </div>
           </div>
 
+{/* Money back guarantee */}
+          <p className="mt-4 text-[11px] text-slate-400 text-center">
+            All paid plans come with a 30 day money back guarantee.
+            If Flow Social does not help you publish more consistently in your first month,
+            email us for a refund.
+          </p>
+
           {checkoutError && (
             <p className="mt-3 text-xs text-red-400 text-center">
               {checkoutError}
