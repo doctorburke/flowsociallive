@@ -9,15 +9,12 @@ export async function POST(req: NextRequest) {
   try {
     if (!stripeSecret) {
       console.error("Missing STRIPE_SECRET_KEY");
-      return NextResponse.json(
-        { error: "Server config error" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Server config error" }, { status: 500 });
     }
 
     const stripe = new Stripe(stripeSecret);
-
     const body = await req.json();
+
     const plan = body.plan as "pro" | "studio_max" | undefined;
     const userId = body.userId as string | undefined;
     const userEmail = body.email as string | undefined;
@@ -28,10 +25,7 @@ export async function POST(req: NextRequest) {
 
     if (!userId || !userEmail) {
       return NextResponse.json(
-        {
-          error:
-            "Please log in inside the Studio first so we can attach this subscription to your account.",
-        },
+        { error: "Please log in inside the Studio first so we can attach this subscription to your account." },
         { status: 401 }
       );
     }
@@ -39,9 +33,7 @@ export async function POST(req: NextRequest) {
     const priceId =
       plan === "pro"
         ? pricePro
-        : plan === "studio_max"
-        ? priceStudioMax
-        : null;
+        : priceStudioMax;
 
     if (!priceId) {
       return NextResponse.json(
@@ -63,18 +55,18 @@ export async function POST(req: NextRequest) {
         },
       ],
 
-      // let the user type a promotion code like FOUNDER100
+      // ⭐ REQUIRED TO ALLOW PROMOTION CODES
       allow_promotion_codes: true,
 
-      // metadata used by the webhook
+      // ⭐⭐ CRITICAL FIX: metadata passed to subscription + session
       metadata: {
-        plan,
-        supabase_user_id: userId,
+        user_id: userId,
+        plan_name: plan,
       },
       subscription_data: {
         metadata: {
-          plan,
-          supabase_user_id: userId,
+          user_id: userId,
+          plan_name: plan,
         },
       },
 
@@ -85,9 +77,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: session.url }, { status: 200 });
   } catch (err: any) {
     console.error("Error creating checkout session:", err);
-    return NextResponse.json(
-      { error: "Could not start checkout." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Could not start checkout." }, { status: 500 });
   }
 }
