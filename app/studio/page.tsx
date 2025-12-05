@@ -146,8 +146,7 @@ useEffect(() => {
         {
           id: user.id,
           email: user.email ?? null,
-          plan: "free",
-          billing_plan: "free",
+          plan: "free", // enum billing_plan in DB
           stripe_customer_id: null,
           stripe_subscription_id: null,
           subscription_status: "inactive",
@@ -166,6 +165,7 @@ useEffect(() => {
 
   ensureProfile();
 }, [user]);
+
 
     // Load current plan and monthly usage for this user
   const refreshUsage = useCallback(async () => {

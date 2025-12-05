@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -50,14 +52,15 @@ async function upgradeFromCheckoutSession(session: Stripe.Checkout.Session) {
   const subscriptionId = session.subscription as string | null;
 
   const update: Record<string, any> = {
-    plan,
-    billing_plan: plan,
+    plan, // this is the enum billing_plan in your DB
     subscription_status: "active",
     updated_at: new Date().toISOString(),
   };
 
   if (customerId) update.stripe_customer_id = customerId;
   if (subscriptionId) update.stripe_subscription_id = subscriptionId;
+
+  console.log("Upgrading profile", userId, "to plan", plan);
 
   const { error } = await supabase
     .from("profiles")
@@ -94,11 +97,19 @@ async function downgradeCustomerToFree(
     return;
   }
 
+  console.log(
+    "Downgrading profile",
+    profile.id,
+    "for customer",
+    stripeCustomerId,
+    "due to",
+    statusNote
+  );
+
   const { error: updateError } = await supabase
     .from("profiles")
     .update({
       plan: "free",
-      billing_plan: "free",
       subscription_status: statusNote,
       stripe_subscription_id: null,
       updated_at: new Date().toISOString(),
@@ -141,6 +152,8 @@ export async function POST(req: Request) {
     });
   }
 
+  console.log("Received Stripe event:", event.type);
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -175,7 +188,6 @@ export async function POST(req: Request) {
       }
 
       default: {
-        // Ignore everything else for now
         console.log("Unhandled Stripe event type:", event.type);
       }
     }
