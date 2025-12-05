@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
+      allow_promotion_codes: true,
       success_url: `${siteUrl}/studio?checkout=success`,
       cancel_url: `${siteUrl}/studio?checkout=cancelled`,
       // This is what we will use inside the webhook
