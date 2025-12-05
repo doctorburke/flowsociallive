@@ -2,24 +2,42 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { supabaseBrowser } from "@/lib/supabaseClient";
+
 
 export default function LandingPage() {
   const [checkoutLoading, setCheckoutLoading] = useState<"pro" | "studio_max" | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  async function handleCheckout(plan: "pro" | "studio_max") {
+    async function handleCheckout(plan: "pro" | "studio_max") {
     try {
       setCheckoutError(null);
       setCheckoutLoading(plan);
 
+      // 1) Get the currently logged in Supabase user (from your Studio login)
+      const {
+        data: { user },
+        error: userError,
+      } = await supabaseBrowser.auth.getUser();
+
+      if (userError || !user) {
+        setCheckoutError(
+          "Please log in inside the Studio first so we can attach this subscription to your account."
+        );
+        setCheckoutLoading(null);
+        return;
+      }
+
+      // 2) Call the API route and send user id + email
       const res = await fetch("/api/stripe/create-checkout-session", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ plan }),
-
-});
-
-
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          userId: user.id,
+          email: user.email,
+        }),
+      });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({} as any));
@@ -52,6 +70,7 @@ export default function LandingPage() {
       setCheckoutLoading(null);
     }
   }
+
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
