@@ -13,10 +13,13 @@ export default function LandingPage() {
       setCheckoutLoading(plan);
 
       const res = await fetch("/api/stripe/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ plan }),
+
+});
+
+
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({} as any));

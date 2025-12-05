@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
-
+const stripeSecret = process.env.STRIPE_SECRET_KEY;
+const pricePro = process.env.STRIPE_PRICE_PRO;
+const priceStudioMax = process.env.STRIPE_PRICE_STUDIO_MAX;
 
 export async function POST(req: NextRequest) {
   try {
+    if (!stripeSecret) {
+      console.error("Missing STRIPE_SECRET_KEY");
+      return NextResponse.json(
+        { error: "Server config error" },
+        { status: 500 }
+      );
+    }
+
+    const stripe = new Stripe(stripeSecret);
+
     const body = await req.json();
     const plan = body.plan as "pro" | "studio_max" | undefined;
 
@@ -15,8 +26,10 @@ export async function POST(req: NextRequest) {
 
     const priceId =
       plan === "pro"
-        ? process.env.STRIPE_PRICE_PRO
-        : process.env.STRIPE_PRICE_STUDIO_MAX;
+        ? pricePro
+        : plan === "studio_max"
+        ? priceStudioMax
+        : null;
 
     if (!priceId) {
       return NextResponse.json(
@@ -26,8 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      "https://flowsociallive.vercel.app";
+      process.env.NEXT_PUBLIC_SITE_URL || "https://flowsocial.ai";
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -37,6 +49,10 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
+      // keep track of which plan they chose
+      metadata: {
+        plan,
+      },
       success_url: `${siteUrl}/studio?checkout=success`,
       cancel_url: `${siteUrl}/studio?checkout=cancelled`,
     });
