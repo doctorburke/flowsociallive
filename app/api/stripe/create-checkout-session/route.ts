@@ -63,7 +63,10 @@ export async function POST(req: NextRequest) {
         },
       ],
 
-      // This is what the webhook reads
+      // let the user type a promotion code like FOUNDER100
+      allow_promotion_codes: true,
+
+      // metadata used by the webhook
       metadata: {
         plan,
         supabase_user_id: userId,
