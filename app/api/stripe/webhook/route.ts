@@ -12,7 +12,9 @@ if (!stripeSecretKey) {
 }
 
 if (!webhookSecret) {
-  console.warn("STRIPE_WEBHOOK_SECRET is not set. Stripe webhooks will not verify.");
+  console.warn(
+    "STRIPE_WEBHOOK_SECRET is not set. Stripe webhooks will not verify."
+  );
 }
 
 if (!supabaseUrl || !serviceRoleKey) {
@@ -87,23 +89,53 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       ? session.subscription
       : session.subscription?.id ?? null;
 
-  // Plan from metadata; default to pro if missing
   const metaPlan = session.metadata?.plan;
   const plan: "pro" | "studio_max" =
     metaPlan === "studio_max" ? "studio_max" : "pro";
 
+  const supabaseUserId = session.metadata?.supabase_user_id || null;
+
   const email =
     session.customer_details?.email || session.customer_email || null;
 
+  // 🔥 Preferred path: we have the exact Supabase user id
+  if (supabaseUserId) {
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        plan,
+        billing_plan: plan,
+        subscription_status: "active",
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
+        // keep email in sync if we have it
+        ...(email ? { email } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", supabaseUserId);
+
+    if (updateError) {
+      console.error(
+        "Error upgrading profile from checkout completion (by id):",
+        updateError
+      );
+    } else {
+      console.log(
+        `Upgraded user ${supabaseUserId} to plan ${plan}. customer=${customerId}, subscription=${subscriptionId}`
+      );
+    }
+    return;
+  }
+
+  // Fallback path: try to match by email
   if (!email) {
     console.warn(
-      "checkout.session.completed has no email; cannot map to profile. customer:",
+      "checkout.session.completed has no supabase_user_id or email; cannot map to profile. customer:",
       customerId
     );
     return;
   }
 
-  // Look up profile by email
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("id, email")
@@ -138,7 +170,10 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     .eq("id", userId);
 
   if (updateError) {
-    console.error("Error upgrading profile from checkout completion:", updateError);
+    console.error(
+      "Error upgrading profile from checkout completion (by email):",
+      updateError
+    );
   } else {
     console.log(
       `Upgraded user ${userId} (${email}) to plan ${plan}. customer=${customerId}, subscription=${subscriptionId}`
