@@ -12,27 +12,71 @@ if (!stripeSecretKey) {
 }
 
 if (!webhookSecret) {
-  console.warn(
-    "STRIPE_WEBHOOK_SECRET is not set. Stripe webhooks will not verify."
-  );
+  console.warn("STRIPE_WEBHOOK_SECRET is not set. Stripe webhooks will not verify.");
 }
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.warn("Supabase admin env vars missing for webhook handler.");
 }
 
-const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey)
+  : null;
+
 
 const supabase =
   supabaseUrl && serviceRoleKey
     ? createClient(supabaseUrl, serviceRoleKey)
     : null;
 
+// Helper: upgrade / attach subscription to a user after successful checkout
+async function upgradeCustomerFromCheckout(session: Stripe.Checkout.Session) {
+  if (!supabase) {
+    console.error("Supabase client not available in upgradeCustomerFromCheckout.");
+    return;
+  }
+
+  const metadata = session.metadata || {};
+  const userId = (metadata.user_id as string | undefined) || null;
+  const planName =
+    ((metadata.plan_name as string | undefined) || "pro") as "free" | "pro" | "studio_max";
+
+  const customerId = (session.customer as string | null) || null;
+  const subscriptionId = (session.subscription as string | null) || null;
+
+  if (!userId) {
+    console.error("checkout.session.completed: missing user_id in metadata");
+    return;
+  }
+
+  console.log("Upgrading user from checkout", {
+    userId,
+    planName,
+    customerId,
+    subscriptionId,
+  });
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      plan: planName,
+      billing_plan: planName,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      subscription_status: "active",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("Error upgrading profile from checkout:", error);
+  } else {
+    console.log(`Successfully upgraded user ${userId} to plan ${planName}.`);
+  }
+}
+
 // Helper: downgrade a Stripe customer to free plan in profiles
-async function downgradeCustomerToFree(
-  stripeCustomerId: string,
-  statusNote: string
-) {
+async function downgradeCustomerToFree(stripeCustomerId: string, statusNote: string) {
   if (!supabase) {
     console.error("Supabase client not available in downgradeCustomerToFree.");
     return;
@@ -76,111 +120,6 @@ async function downgradeCustomerToFree(
   }
 }
 
-// Helper: upgrade / attach profile on checkout.session.completed
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-  if (!supabase) {
-    console.error("Supabase client not available in handleCheckoutCompleted.");
-    return;
-  }
-
-  const customerId = session.customer as string | null;
-  const subscriptionId =
-    typeof session.subscription === "string"
-      ? session.subscription
-      : session.subscription?.id ?? null;
-
-  const metaPlan = session.metadata?.plan;
-  const plan: "pro" | "studio_max" =
-    metaPlan === "studio_max" ? "studio_max" : "pro";
-
-  const supabaseUserId = session.metadata?.supabase_user_id || null;
-
-  const email =
-    session.customer_details?.email || session.customer_email || null;
-
-  // 🔥 Preferred path: we have the exact Supabase user id
-  if (supabaseUserId) {
-    const { error: updateError } = await supabase
-      .from("profiles")
-      .update({
-        plan,
-        billing_plan: plan,
-        subscription_status: "active",
-        stripe_customer_id: customerId,
-        stripe_subscription_id: subscriptionId,
-        // keep email in sync if we have it
-        ...(email ? { email } : {}),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", supabaseUserId);
-
-    if (updateError) {
-      console.error(
-        "Error upgrading profile from checkout completion (by id):",
-        updateError
-      );
-    } else {
-      console.log(
-        `Upgraded user ${supabaseUserId} to plan ${plan}. customer=${customerId}, subscription=${subscriptionId}`
-      );
-    }
-    return;
-  }
-
-  // Fallback path: try to match by email
-  if (!email) {
-    console.warn(
-      "checkout.session.completed has no supabase_user_id or email; cannot map to profile. customer:",
-      customerId
-    );
-    return;
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id, email")
-    .eq("email", email)
-    .maybeSingle();
-
-  if (profileError) {
-    console.error("Error fetching profile for checkout completion:", profileError);
-    return;
-  }
-
-  if (!profile) {
-    console.warn(
-      "No profile found for checkout email; user may not have logged into studio yet:",
-      email
-    );
-    return;
-  }
-
-  const { id: userId } = profile;
-
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({
-      plan,
-      billing_plan: plan,
-      subscription_status: "active",
-      stripe_customer_id: customerId,
-      stripe_subscription_id: subscriptionId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", userId);
-
-  if (updateError) {
-    console.error(
-      "Error upgrading profile from checkout completion (by email):",
-      updateError
-    );
-  } else {
-    console.log(
-      `Upgraded user ${userId} (${email}) to plan ${plan}. customer=${customerId}, subscription=${subscriptionId}`
-    );
-  }
-}
-
 export async function POST(req: Request) {
   if (!stripe || !webhookSecret) {
     console.error("Stripe or webhook secret not configured.");
@@ -195,7 +134,6 @@ export async function POST(req: Request) {
   }
 
   const body = await req.text();
-
   let event: Stripe.Event;
 
   try {
@@ -205,20 +143,18 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
+  console.log("Received Stripe event:", event.type);
+
   try {
     switch (event.type) {
+      // UPGRADE / ATTACH PLAN
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        console.log(
-          "checkout.session.completed",
-          session.id,
-          "customer",
-          session.customer
-        );
-        await handleCheckoutCompleted(session);
+        await upgradeCustomerFromCheckout(session);
         break;
       }
 
+      // DOWNGRADE / CANCEL CASES
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = invoice.customer as string | null;
@@ -230,7 +166,6 @@ export async function POST(req: Request) {
             "subscription",
             (invoice as any)["subscription"] ?? null
           );
-
           await downgradeCustomerToFree(customerId, "payment_failed");
         }
         break;
@@ -245,7 +180,6 @@ export async function POST(req: Request) {
 
         console.log("subscription.updated", customerId, "status", status);
 
-        // If subscription is no longer active or trialing, downgrade
         if (
           status === "canceled" ||
           status === "unpaid" ||
@@ -253,7 +187,6 @@ export async function POST(req: Request) {
         ) {
           await downgradeCustomerToFree(customerId, `subscription_${status}`);
         }
-
         break;
       }
 
@@ -269,13 +202,12 @@ export async function POST(req: Request) {
       }
 
       default: {
-        // For now we ignore other events
         console.log("Unhandled Stripe event type:", event.type);
       }
     }
   } catch (err: any) {
     console.error("Error handling Stripe webhook event:", err);
-    // Return 200 so Stripe does not retry forever, but log for investigation
+    // Still return 200 so Stripe does not retry forever
     return new NextResponse("Webhook handler error", { status: 200 });
   }
 
