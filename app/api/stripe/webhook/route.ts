@@ -19,63 +19,88 @@ if (!supabaseUrl || !serviceRoleKey) {
   console.warn("Supabase admin env vars missing for webhook handler.");
 }
 
-const stripe = stripeSecretKey
-  ? new Stripe(stripeSecretKey)
-  : null;
-
+const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 
 const supabase =
   supabaseUrl && serviceRoleKey
     ? createClient(supabaseUrl, serviceRoleKey)
     : null;
 
-// Helper: upgrade / attach subscription to a user after successful checkout
-async function upgradeCustomerFromCheckout(session: Stripe.Checkout.Session) {
+// helper to decide which plan string to use in Supabase
+function normalizePlan(planFromMetadata: string | null | undefined): "pro" | "studio_max" {
+  if (planFromMetadata === "studio_max") return "studio_max";
+  return "pro";
+}
+
+// upgrade or sync a customer in profiles on successful checkout
+async function upgradeCustomerFromCheckout(params: {
+  stripeCustomerId: string;
+  stripeSubscriptionId: string | null;
+  email: string | null;
+  planFromMetadata: string | null | undefined;
+}) {
   if (!supabase) {
     console.error("Supabase client not available in upgradeCustomerFromCheckout.");
     return;
   }
 
-  const metadata = session.metadata || {};
-  const userId = (metadata.user_id as string | undefined) || null;
-  const planName =
-    ((metadata.plan_name as string | undefined) || "pro") as "free" | "pro" | "studio_max";
+  const { stripeCustomerId, stripeSubscriptionId, email, planFromMetadata } = params;
+  const plan = normalizePlan(planFromMetadata ?? null);
 
-  const customerId = (session.customer as string | null) || null;
-  const subscriptionId = (session.subscription as string | null) || null;
+  // try find profile by email first, then by stripe_customer_id
+  let profileResult = await supabase
+    .from("profiles")
+    .select("id, email, plan, stripe_customer_id")
+    .eq("email", email ?? "")
+    .maybeSingle();
 
-  if (!userId) {
-    console.error("checkout.session.completed: missing user_id in metadata");
+  if (profileResult.error || !profileResult.data) {
+    profileResult = await supabase
+      .from("profiles")
+      .select("id, email, plan, stripe_customer_id")
+      .eq("stripe_customer_id", stripeCustomerId)
+      .maybeSingle();
+  }
+
+  if (profileResult.error) {
+    console.error("Error fetching profile for upgrade:", profileResult.error);
     return;
   }
 
-  console.log("Upgrading user from checkout", {
-    userId,
-    planName,
-    customerId,
-    subscriptionId,
-  });
+  if (!profileResult.data) {
+    console.warn(
+      "No profile found to upgrade for customer",
+      stripeCustomerId,
+      "email",
+      email
+    );
+    return;
+  }
 
-  const { error } = await supabase
+  const userId = profileResult.data.id;
+
+  const { error: updateError } = await supabase
     .from("profiles")
     .update({
-      plan: planName,
-      billing_plan: planName,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: subscriptionId,
+      plan,
+      billing_plan: plan,
       subscription_status: "active",
+      stripe_customer_id: stripeCustomerId,
+      stripe_subscription_id: stripeSubscriptionId,
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId);
 
-  if (error) {
-    console.error("Error upgrading profile from checkout:", error);
+  if (updateError) {
+    console.error("Error upgrading profile plan:", updateError);
   } else {
-    console.log(`Successfully upgraded user ${userId} to plan ${planName}.`);
+    console.log(
+      `Upgraded user ${userId} to plan ${plan} (customer ${stripeCustomerId}).`
+    );
   }
 }
 
-// Helper: downgrade a Stripe customer to free plan in profiles
+// downgrade helper (you already had this)
 async function downgradeCustomerToFree(stripeCustomerId: string, statusNote: string) {
   if (!supabase) {
     console.error("Supabase client not available in downgradeCustomerToFree.");
@@ -127,7 +152,6 @@ export async function POST(req: Request) {
   }
 
   const signature = req.headers.get("stripe-signature");
-
   if (!signature) {
     console.error("Missing Stripe signature header.");
     return new NextResponse("Missing signature", { status: 400 });
@@ -143,18 +167,35 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  console.log("Received Stripe event:", event.type);
-
   try {
     switch (event.type) {
-      // UPGRADE / ATTACH PLAN
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        await upgradeCustomerFromCheckout(session);
+        const customerId = session.customer as string | null;
+        const subscriptionId = session.subscription as string | null;
+        const metadata = session.metadata || {};
+        const emailFromMeta = (metadata["email"] as string | undefined) ?? null;
+        const emailFromSession =
+          (session.customer_details?.email as string | undefined) ?? null;
+
+        if (customerId) {
+          console.log(
+            "checkout.session.completed for customer",
+            customerId,
+            "subscription",
+            subscriptionId
+          );
+
+          await upgradeCustomerFromCheckout({
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscriptionId,
+            email: emailFromMeta ?? emailFromSession,
+            planFromMetadata: metadata["plan"] as string | undefined,
+          });
+        }
         break;
       }
 
-      // DOWNGRADE / CANCEL CASES
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = invoice.customer as string | null;
@@ -178,14 +219,22 @@ export async function POST(req: Request) {
 
         if (!customerId) break;
 
-        console.log("subscription.updated", customerId, "status", status);
+        console.log(
+          "subscription.updated",
+          customerId,
+          "status",
+          status
+        );
 
         if (
           status === "canceled" ||
           status === "unpaid" ||
           status === "past_due"
         ) {
-          await downgradeCustomerToFree(customerId, `subscription_${status}`);
+          await downgradeCustomerToFree(
+            customerId,
+            `subscription_${status}`
+          );
         }
         break;
       }
@@ -195,7 +244,10 @@ export async function POST(req: Request) {
         const customerId = subscription.customer as string | null;
 
         if (customerId) {
-          console.log("subscription.deleted for customer", customerId);
+          console.log(
+            "subscription.deleted for customer",
+            customerId
+          );
           await downgradeCustomerToFree(customerId, "subscription_deleted");
         }
         break;
@@ -207,7 +259,7 @@ export async function POST(req: Request) {
     }
   } catch (err: any) {
     console.error("Error handling Stripe webhook event:", err);
-    // Still return 200 so Stripe does not retry forever
+    // return 200 so Stripe does not retry forever, but log for investigation
     return new NextResponse("Webhook handler error", { status: 200 });
   }
 
