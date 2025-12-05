@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const stripe = new Stripe(stripeSecret as string);
+    const stripe = new Stripe(stripeSecret);
 
     const body = await req.json();
     const plan = body.plan as "pro" | "studio_max" | undefined;
@@ -26,10 +26,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing plan." }, { status: 400 });
     }
 
-    const priceId =
-      plan === "pro"
-        ? pricePro
-        : priceStudioMax;
+    if (!userId || !userEmail) {
+      return NextResponse.json(
+        { error: "Missing user for checkout." },
+        { status: 401 }
+      );
+    }
+
+    const priceId = plan === "pro" ? pricePro : priceStudioMax;
 
     if (!priceId) {
       return NextResponse.json(
@@ -38,10 +42,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://flowsocial.ai";
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL || "https://flowsocial.ai";
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
+      customer_email: userEmail,
       line_items: [
         {
           price: priceId,
@@ -50,18 +56,23 @@ export async function POST(req: NextRequest) {
       ],
       success_url: `${siteUrl}/studio?checkout=success`,
       cancel_url: `${siteUrl}/studio?checkout=cancelled`,
-      customer_email: userEmail,
-      // this is what the webhook will use
+      // This is what we will use inside the webhook
       metadata: {
+        user_id: userId,
+        user_email: userEmail,
         plan,
-        user_id: userId ?? "",
-        email: userEmail ?? "",
       },
-      allow_promotion_codes: true,
+      // Also copy to subscription metadata for safety
+      subscription_data: {
+        metadata: {
+          user_id: userId,
+          plan,
+        },
+      },
     });
 
     return NextResponse.json({ url: session.url }, { status: 200 });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error creating checkout session:", err);
     return NextResponse.json(
       { error: "Could not start checkout." },
