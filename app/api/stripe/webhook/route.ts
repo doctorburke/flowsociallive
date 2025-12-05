@@ -25,6 +25,8 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 
+
+
 const supabase =
   supabaseUrl && serviceRoleKey
     ? createClient(supabaseUrl, serviceRoleKey)

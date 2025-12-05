@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const stripe = new Stripe(stripeSecret);
+    const stripe = new Stripe(stripeSecret as string);
 
     const body = await req.json();
     const plan = body.plan as "pro" | "studio_max" | undefined;
