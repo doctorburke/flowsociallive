@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     }
 
     // --------------------------------------------
-    // Existing caption + image-prompt logic
+    // Caption + image prompt logic
     // --------------------------------------------
 
     const brandName = brand.brandName || "this brand";
@@ -85,8 +85,8 @@ Content pillars: ${contentPillars}
 `.trim();
 
     const userInstruction = userPrompt.trim()
-      ? `User idea for this post: "${userPrompt.trim()}". Expand this into a strong social caption that fits the brand.`
-      : `Create a new social media post idea and caption that fits this brand with no extra input from the user.`;
+      ? `User idea for this post: "${userPrompt.trim()}". Turn this into a concise, punchy social caption that fits the brand.`
+      : `Create a new concise social media caption and idea that fits this brand with no extra input from the user.`;
 
     // 1) Generate the caption
     const captionPrompt = `
@@ -97,12 +97,16 @@ Use the brand details below to guide every choice of tone, topic, and angle.
 ${brandContext}
 
 Task:
-- Write one caption only, no hashtags.
+- Write one caption only (hashtags will be added separately later).
+- Keep it succinct: maximum 5 sentences and roughly under 650 characters.
+- Format for Instagram:
+  - Start with a short hook on its own line.
+  - Use short paragraphs with blank lines between key ideas.
+  - Avoid long walls of text; keep lines tight and easy to scan.
 - Speak directly to ${targetMarket}.
 - Reflect the content pillars: ${contentPillars}.
 - Imply or support the product or brand, but do not sound like a hard ad on every line.
 - Keep it natural, human, and engaging.
-- Use a single short hook in the first line.
 - Do not use em dashes. If you want a break in a sentence, use a comma or " - " instead.
 
 ${userInstruction}
@@ -113,10 +117,57 @@ ${userInstruction}
       input: captionPrompt,
     });
 
-    const caption =
+    const captionRaw =
       (captionResp as any).output_text ||
       (captionResp as any).output?.[0]?.content?.[0]?.text ||
       "Could not generate caption.";
+
+    // Cleanup for Instagram formatting and no em dashes
+    const captionClean = captionRaw
+      // Normalize any em dash or en dash characters just in case
+      .replace(/\u2014/g, " - ")
+      .replace(/\u2013/g, " - ")
+      // Trim spaces before newlines
+      .replace(/\s+\n/g, "\n")
+      // Avoid more than two consecutive newlines
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    // --------------------------------------------
+    // 1B) Generate 3 category-specific hashtags
+    // --------------------------------------------
+    const hashtagPrompt = `
+Based on this brand and caption, generate exactly 3 short, relevant hashtags.
+
+Rules:
+- No generic spam hashtags.
+- No brand name hashtags unless the brand is widely known.
+- Each hashtag must be simple and category-specific.
+- Return only the 3 hashtags separated by spaces on one line.
+
+Brand:
+${brandContext}
+
+Caption:
+"${captionClean}"
+`.trim();
+
+    const hashtagResp = await client.responses.create({
+      model: "gpt-4.1-mini",
+      input: hashtagPrompt,
+    });
+
+    const hashtagsRaw =
+      (hashtagResp as any).output_text ||
+      (hashtagResp as any).output?.[0]?.content?.[0]?.text ||
+      "";
+
+    const hashtags = hashtagsRaw.trim();
+
+    // Final caption with hashtags as last paragraph
+    const finalCaption = hashtags
+      ? `${captionClean}\n\n${hashtags}`
+      : captionClean;
 
     // 2) Generate a short image prompt that matches the caption + brand
     const imagePromptPrompt = `
@@ -126,7 +177,7 @@ Brand context:
 ${brandContext}
 
 Caption:
-"${caption}"
+"${captionClean}"
 
 Write a single sentence that describes one realistic photo that would fit this caption and brand.
 Include:
@@ -149,7 +200,7 @@ Return only the sentence, nothing else.
       (imagePromptResp as any).output?.[0]?.content?.[0]?.text ||
       "";
 
-    return NextResponse.json({ caption, imagePrompt });
+    return NextResponse.json({ caption: finalCaption, imagePrompt });
   } catch (error: any) {
     console.error("Caption generation error:", error);
     return NextResponse.json(
