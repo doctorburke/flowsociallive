@@ -385,7 +385,7 @@ useEffect(() => {
         }
       } else {
         setAuthStatus(
-          "Magic link sent. Check your inbox and open the link on this device to log in."
+          "Magic link sent. Check your inbox."
         );
         setHasSentMagicLink(true);
       }
