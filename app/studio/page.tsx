@@ -2,13 +2,11 @@
 
 export const dynamic = "force-dynamic";
 
-
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabaseBrowser } from "../../lib/supabaseClient";
 import { getPlanPostLimit, getCurrentPeriodStart } from "@/lib/planLimits";
-
 
 type BrandSettings = {
   brandName: string;
@@ -69,11 +67,14 @@ export default function Page() {
 
   const [prompt, setPrompt] = useState("");
   const [lastPromptLabel, setLastPromptLabel] = useState<string | null>(null);
-  const [caption, setCaption] = useState<string | null>(null);
+
+  // Now supports 3 captions
+  const [captions, setCaptions] = useState<string[]>([]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   // Auth state
   const [user, setUser] = useState<any | null>(null);
@@ -87,14 +88,48 @@ export default function Page() {
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [selectedPost, setSelectedPost] = useState<StudioPost | null>(null);
 
+  // Feed preview tiles (ALWAYS computed to avoid hook order issues)
+  const feedTiles = useMemo(() => {
+    const tiles: Array<{ src: string | null; label: string }> = [];
+
+    // 1) Latest image currently in the editor
+    if (imageUrl) tiles.push({ src: imageUrl, label: "Latest" });
+
+    // 2) Then recent saved post images, skipping duplicates
+    for (const p of posts) {
+      if (!p.image_url) continue;
+
+      if (tiles.some((t) => t.src === p.image_url)) continue;
+
+      tiles.push({ src: p.image_url, label: "Recent" });
+      if (tiles.length >= 4) break;
+    }
+
+    // 3) Pad to 4 tiles
+    while (tiles.length < 4) tiles.push({ src: null, label: "Coming next" });
+
+    return tiles.slice(0, 4);
+  }, [imageUrl, posts]);
+
   const [checkoutNotice, setCheckoutNotice] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
-    // Usage and plan state
+
+  // Usage and plan state
   const [usageInfo, setUsageInfo] = useState<PlanUsageInfo | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
 
+  // -----------------------------
+  // Premium light tokens (inline)
+  // -----------------------------
+  const bg = "#F6F8FF";
+  const card = "bg-white/90 backdrop-blur";
+  const border = "border border-slate-200/70";
+  const shadow =
+    "shadow-[0_20px_60px_-40px_rgba(2,6,23,0.35)] shadow-slate-900/5";
+  const radius = "rounded-[28px]";
+  const accent = "#0EA5E9";
 
   // Load user on mount and subscribe to auth changes
   useEffect(() => {
@@ -116,58 +151,50 @@ export default function Page() {
     };
   }, []);
 
-  // Ensure the user has a profile row with a default free plan
-useEffect(() => {
-  const ensureProfile = async () => {
-    if (!user) return;
+  // Ensure profile exists
+  useEffect(() => {
+    const ensureProfile = async () => {
+      if (!user) return;
 
-    try {
-      const supabase = supabaseBrowser;
+      try {
+        const supabase = supabaseBrowser;
 
-      // 1) Check if profile already exists
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id", user.id)
-        .maybeSingle();
+        const { data, error: profileCheckError } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", user.id)
+          .maybeSingle();
 
-      if (error && error.code !== "PGRST116") {
-        console.error("Error checking profile:", error);
-        return;
+        if (profileCheckError && profileCheckError.code !== "PGRST116") {
+          console.error("Error checking profile:", profileCheckError);
+          return;
+        }
+
+        if (data) return;
+
+        const { error: insertError } = await supabase.from("profiles").insert([
+          {
+            id: user.id,
+            email: user.email ?? null,
+            plan: "free",
+            stripe_customer_id: null,
+            stripe_subscription_id: null,
+            subscription_status: "inactive",
+          },
+        ]);
+
+        if (insertError) {
+          console.error("Error creating profile:", insertError);
+        }
+      } catch (err) {
+        console.error("ensureProfile exception:", err);
       }
+    };
 
-      if (data) {
-        // Profile already exists, nothing to do
-        return;
-      }
+    ensureProfile();
+  }, [user]);
 
-      // 2) Create a new profile with default free plan
-      const { error: insertError } = await supabase.from("profiles").insert([
-        {
-          id: user.id,
-          email: user.email ?? null,
-          plan: "free", // enum billing_plan in DB
-          stripe_customer_id: null,
-          stripe_subscription_id: null,
-          subscription_status: "inactive",
-        },
-      ]);
-
-      if (insertError) {
-        console.error("Error creating profile:", insertError);
-      } else {
-        console.log("Created default profile for user", user.id);
-      }
-    } catch (err) {
-      console.error("ensureProfile exception:", err);
-    }
-  };
-
-  ensureProfile();
-}, [user]);
-
-
-    // Load current plan and monthly usage for this user
+  // Load current plan and monthly usage
   const refreshUsage = useCallback(async () => {
     if (!user) {
       setUsageInfo(null);
@@ -178,7 +205,6 @@ useEffect(() => {
       setUsageLoading(true);
       const supabase = supabaseBrowser;
 
-      // 1) Get the user's plan from profiles
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("plan")
@@ -194,8 +220,6 @@ useEffect(() => {
         planRaw === "pro" || planRaw === "studio_max" ? planRaw : "free";
 
       const maxPostsPerMonth = getPlanPostLimit(plan);
-
-      // 2) Get current period usage from usage_stats
       const periodStart = getCurrentPeriodStart(new Date());
 
       const { data: usageRow, error: usageError } = await supabase
@@ -228,8 +252,6 @@ useEffect(() => {
     refreshUsage();
   }, [refreshUsage]);
 
-
-
   // Load brand for current user
   useEffect(() => {
     const loadBrandForUser = async () => {
@@ -240,7 +262,7 @@ useEffect(() => {
       }
 
       try {
-        const { data, error } = await supabaseBrowser
+        const { data, error: brandError } = await supabaseBrowser
           .from("brands")
           .select("*")
           .eq("user_id", user.id)
@@ -248,8 +270,8 @@ useEffect(() => {
           .limit(1)
           .maybeSingle();
 
-        if (error) {
-          console.error("Error loading brand:", error);
+        if (brandError) {
+          console.error("Error loading brand:", brandError);
           return;
         }
 
@@ -284,13 +306,13 @@ useEffect(() => {
   }, [user]);
 
   // Load posts for current user and brand
-  const loadPosts = async () => {
+  const loadPosts = useCallback(async () => {
     if (!user || !brandId) return;
 
     try {
       setIsLoadingPosts(true);
 
-      const { data, error } = await supabaseBrowser
+      const { data, error: postsError } = await supabaseBrowser
         .from("posts")
         .select("id, caption, image_url, prompt_used, created_at")
         .eq("user_id", user.id)
@@ -298,8 +320,8 @@ useEffect(() => {
         .order("created_at", { ascending: false })
         .limit(20);
 
-      if (error) {
-        console.error("Error loading posts:", error);
+      if (postsError) {
+        console.error("Error loading posts:", postsError);
         return;
       }
 
@@ -309,23 +331,21 @@ useEffect(() => {
     } finally {
       setIsLoadingPosts(false);
     }
-  };
+  }, [user, brandId]);
 
-  // When user and brand are ready, load posts
   useEffect(() => {
     if (user && brandId) {
       loadPosts();
     } else {
       setPosts([]);
     }
-  }, [user, brandId]);
+  }, [user, brandId, loadPosts]);
 
-  // Stripe checkout URL messages + URL cleanup
+  // Stripe checkout banner + URL cleanup
   useEffect(() => {
     const status = searchParams.get("checkout");
     if (!status) return;
 
-    // 1. Set the banner
     if (status === "success") {
       setCheckoutNotice({
         type: "success",
@@ -338,7 +358,6 @@ useEffect(() => {
       });
     }
 
-    // 2. Clean the URL so banner only shows once
     const params = new URLSearchParams(searchParams.toString());
     params.delete("checkout");
 
@@ -348,7 +367,7 @@ useEffect(() => {
     router.replace(newUrl);
   }, [searchParams, router]);
 
-    async function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setAuthStatus(null);
     setAuthLoading(true);
@@ -362,18 +381,17 @@ useEffect(() => {
         return;
       }
 
-      const { error } = await supabaseBrowser.auth.signInWithOtp({
+      const { error: signInError } = await supabaseBrowser.auth.signInWithOtp({
         email,
         options: {
           emailRedirectTo: `${window.location.origin}/studio`,
         },
       });
 
-      if (error) {
-        console.error(error);
-        const msg = (error.message || "").toLowerCase();
+      if (signInError) {
+        console.error(signInError);
+        const msg = (signInError.message || "").toLowerCase();
 
-        // Treat rate limit as "you already have a link"
         if (msg.includes("rate") && msg.includes("limit")) {
           setAuthStatus(
             "Magic link already sent. Check your inbox or try again in a minute."
@@ -384,9 +402,7 @@ useEffect(() => {
           setHasSentMagicLink(false);
         }
       } else {
-        setAuthStatus(
-          "Magic link sent. Check your inbox."
-        );
+        setAuthStatus("Magic link sent. Check your inbox.");
         setHasSentMagicLink(true);
       }
     } catch (err) {
@@ -398,14 +414,13 @@ useEffect(() => {
     }
   }
 
-
   async function handleLogout() {
     await supabaseBrowser.auth.signOut();
     setUser(null);
     setBrandSettings(defaultBrandSettings);
     setBrandId(null);
     setPrompt("");
-    setCaption(null);
+    setCaptions([]);
     setImageUrl(null);
     setLastPromptLabel(null);
     setPosts([]);
@@ -414,15 +429,11 @@ useEffect(() => {
   function buildPersonaList(settings: BrandSettings): string[] {
     const personas: string[] = [];
 
-    if (settings.personaPrimary.trim()) {
+    if (settings.personaPrimary.trim())
       personas.push(settings.personaPrimary.trim());
-    }
-    if (settings.personaSecondary.trim()) {
+    if (settings.personaSecondary.trim())
       personas.push(settings.personaSecondary.trim());
-    }
-    if (settings.personaThird.trim()) {
-      personas.push(settings.personaThird.trim());
-    }
+    if (settings.personaThird.trim()) personas.push(settings.personaThird.trim());
 
     if (personas.length === 0) {
       const generic =
@@ -484,43 +495,6 @@ useEffect(() => {
     return { impliesHuman, explicitNoHuman };
   }
 
-  function buildShotHint(
-    userPrompt: string,
-    flags: PromptHumanAnalysis,
-    isProductFocus: boolean,
-    postsCount: number
-  ): string {
-    const index = postsCount % 4;
-
-    if (isProductFocus) {
-      const productTemplates = [
-        "Hero product shot where the product is the clear main subject of the frame.",
-        "Medium close up focusing on the product with the background gently blurred.",
-        "Detail shot highlighting texture, materials, stitching, or key functional elements of the product.",
-        "Lifestyle product shot where the environment supports the story but the product is still the star.",
-      ];
-      return productTemplates[index];
-    }
-
-    if (!flags.impliesHuman || flags.explicitNoHuman) {
-      const nonHumanTemplates = [
-        "Wide environmental shot focused on the overall scene.",
-        "Medium wide shot showing the main objects and environment.",
-        "Close up detail shot emphasizing textures, edges, and materials.",
-        "Cinematic composition with leading lines and depth of field.",
-      ];
-      return nonHumanTemplates[index];
-    } else {
-      const humanTemplates = [
-        "Dynamic action shot capturing movement.",
-        "Medium portrait style shot from the waist up.",
-        "Candid lifestyle shot with a natural pose, not overly staged.",
-        "Close up shot that includes part of the athlete and their gear.",
-      ];
-      return humanTemplates[index];
-    }
-  }
-
   function analyzeProductFocus(rawPrompt: string): boolean {
     const p = rawPrompt.toLowerCase();
 
@@ -559,6 +533,43 @@ useEffect(() => {
     return productWords.some((w) => p.includes(w));
   }
 
+  function buildShotHint(
+    userPrompt: string,
+    flags: PromptHumanAnalysis,
+    isProductFocus: boolean,
+    postsCount: number
+  ): string {
+    const index = postsCount % 4;
+
+    if (isProductFocus) {
+      const productTemplates = [
+        "Hero product shot where the product is the clear main subject of the frame.",
+        "Medium close up focusing on the product with the background gently blurred.",
+        "Detail shot highlighting texture, materials, stitching, or key functional elements of the product.",
+        "Lifestyle product shot where the environment supports the story but the product is still the star.",
+      ];
+      return productTemplates[index];
+    }
+
+    if (!flags.impliesHuman || flags.explicitNoHuman) {
+      const nonHumanTemplates = [
+        "Wide environmental shot focused on the overall scene.",
+        "Medium wide shot showing the main objects and environment.",
+        "Close up detail shot emphasizing textures, edges, and materials.",
+        "Cinematic composition with leading lines and depth of field.",
+      ];
+      return nonHumanTemplates[index];
+    }
+
+    const humanTemplates = [
+      "Dynamic action shot capturing movement.",
+      "Medium portrait style shot from the waist up.",
+      "Candid lifestyle shot with a natural pose, not overly staged.",
+      "Close up shot that includes part of the athlete and their gear.",
+    ];
+    return humanTemplates[index];
+  }
+
   async function handleCreatePost() {
     const userPrompt = prompt.trim();
 
@@ -570,14 +581,13 @@ useEffect(() => {
     try {
       setIsGenerating(true);
       setError(null);
-      setCaption(null);
+      setCaptions([]);
       setImageUrl(null);
-      setCopied(false);
+      setCopiedIndex(null);
 
-      const label = userPrompt;
-      setLastPromptLabel(label);
+      setLastPromptLabel(userPrompt);
 
-      // 1) Caption
+      // 1) Captions (now 3)
       const captionRes = await fetch("/api/generate-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -603,14 +613,21 @@ useEffect(() => {
       }
 
       const captionJson = (await captionRes.json()) as {
-        caption: string;
+        captions?: string[];
+        caption?: string; // legacy fallback
         imagePrompt?: string;
       };
 
-      const safeCaption = captionJson.caption || "";
-      setCaption(safeCaption);
+      const bundle =
+        Array.isArray(captionJson.captions) && captionJson.captions.length
+          ? captionJson.captions
+          : captionJson.caption
+          ? [captionJson.caption]
+          : [];
 
-      // 2) Build image prompt with Option C plus product first mode
+      setCaptions(bundle);
+
+      // 2) Build image prompt (your existing logic)
       const flags = analyzePromptForHumans(userPrompt);
       const isProductFocus = analyzeProductFocus(userPrompt);
       const shotHint = buildShotHint(
@@ -622,9 +639,7 @@ useEffect(() => {
 
       const brandHintsParts: string[] = [];
       if (brandSettings.brandName.trim()) {
-        brandHintsParts.push(
-          `Brand name: ${brandSettings.brandName.trim()}.`
-        );
+        brandHintsParts.push(`Brand name: ${brandSettings.brandName.trim()}.`);
       }
       if (brandSettings.brandColorsAndStyle.trim()) {
         brandHintsParts.push(
@@ -649,14 +664,9 @@ useEffect(() => {
       const peopleMode = brandSettings.peopleMode || "auto";
 
       let usePersona: boolean;
-
-      if (peopleMode === "no_people") {
-        usePersona = false;
-      } else if (peopleMode === "prefer_people") {
-        usePersona = !flags.explicitNoHuman;
-      } else {
-        usePersona = flags.impliesHuman && !flags.explicitNoHuman;
-      }
+      if (peopleMode === "no_people") usePersona = false;
+      else if (peopleMode === "prefer_people") usePersona = !flags.explicitNoHuman;
+      else usePersona = flags.impliesHuman && !flags.explicitNoHuman;
 
       let baseImagePrompt: string;
 
@@ -674,14 +684,17 @@ ${userPrompt}
 Important visual rules:
 - The image must include a human that matches the persona below.
 - Do not invent extra people. Only include the one primary subject unless the user clearly requests multiple.
-- The person must clearly match the age, gender, vibe, and role implied in the scene.
 - The person must be engaged in an action that matches the user instruction.
-- Make every specific detail from the user request visible in the image, including objects, tools, environment, time of day, mood, and setting.
+- Make every specific detail from the user request visible in the image.
 
 Persona:
 ${persona}
 
-${isProductFocus ? "The product or gear in the user prompt must be clearly visible and treated as the hero of the image." : ""}
+${
+  isProductFocus
+    ? "The product or gear in the user prompt must be clearly visible and treated as the hero of the image."
+    : ""
+}
 
 Shot guidance:
 ${shotHint}
@@ -692,7 +705,6 @@ ${brandHints}
 Hard rules:
 - No readable logos or text.
 - No UI elements, screens, overlays, watermarks, or captions.
-- No unrealistic lighting or effects unless the user requested them.
         `.trim();
       } else {
         baseImagePrompt = `
@@ -704,8 +716,6 @@ ${userPrompt}
 Important visual rules:
 - Do not include any humans, silhouettes, reflections or shadows of people, body parts, or implied humans.
 - The scene must focus entirely on the objects, environment, product, and details described by the user.
-- Make every specific detail from the user request clearly visible in the final image.
-- If the prompt includes a product, setting, tool, or object, it must be accurately represented.
 
 ${
   isProductFocus
@@ -761,28 +771,26 @@ Hard rules:
 
       setImageUrl(finalUrl);
 
-      // 4) Save post to Supabase in the background
+      // 4) Save post (keep working)
       try {
-        if (user && brandId && safeCaption.trim()) {
-          const { error: postError } = await supabaseBrowser
-            .from("posts")
-            .insert([
-              {
-                user_id: user.id,
-                brand_id: brandId,
-                caption: safeCaption,
-                image_url: (imageData as any).imageUrl || null,
-                prompt_used: userPrompt || null,
-              },
-            ]);
+        const captionToSave = (bundle?.[0] || "").trim(); // save the best option
+        if (user && brandId && captionToSave) {
+          const { error: postError } = await supabaseBrowser.from("posts").insert([
+            {
+              user_id: user.id,
+              brand_id: brandId,
+              caption: captionToSave,
+              image_url: (imageData as any).imageUrl || null,
+              prompt_used: userPrompt || null,
+            },
+          ]);
 
-                    if (postError) {
+          if (postError) {
             console.error("Error saving post:", postError);
           } else {
-            loadPosts();
+            await loadPosts();
             await refreshUsage();
           }
-
         }
       } catch (postErr) {
         console.error("Unexpected error saving post:", postErr);
@@ -811,7 +819,7 @@ Hard rules:
       setBrandStatus(null);
 
       if (brandId) {
-        const { error } = await supabaseBrowser
+        const { error: updateError } = await supabaseBrowser
           .from("brands")
           .update({
             brand_name: brandSettings.brandName || null,
@@ -829,13 +837,13 @@ Hard rules:
           .eq("id", brandId)
           .eq("user_id", user.id);
 
-        if (error) {
-          console.error("Error updating brand:", error);
+        if (updateError) {
+          console.error("Error updating brand:", updateError);
           setBrandStatus("Could not save brand. Please try again.");
           return;
         }
       } else {
-        const { data, error } = await supabaseBrowser
+        const { data, error: insertError } = await supabaseBrowser
           .from("brands")
           .insert([
             {
@@ -843,8 +851,7 @@ Hard rules:
               brand_name: brandSettings.brandName || null,
               industry: brandSettings.industry || null,
               target_market: brandSettings.targetMarket || null,
-              brand_colors_and_style:
-                brandSettings.brandColorsAndStyle || null,
+              brand_colors_and_style: brandSettings.brandColorsAndStyle || null,
               content_pillars: brandSettings.contentPillars || null,
               default_image_focus: brandSettings.defaultImageFocus || null,
               persona_primary: brandSettings.personaPrimary || null,
@@ -856,15 +863,13 @@ Hard rules:
           .select()
           .single();
 
-        if (error) {
-          console.error("Error inserting brand:", error);
+        if (insertError) {
+          console.error("Error inserting brand:", insertError);
           setBrandStatus("Could not save brand. Please try again.");
           return;
         }
 
-        if (data?.id) {
-          setBrandId(data.id);
-        }
+        if (data?.id) setBrandId(data.id);
       }
 
       setBrandStatus("Brand saved.");
@@ -878,12 +883,13 @@ Hard rules:
     }
   }
 
-  async function handleCopyCaption() {
-    if (!caption) return;
+  async function handleCopyCaption(idx: number) {
+    const text = captions[idx];
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(caption);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(idx);
+      setTimeout(() => setCopiedIndex(null), 1200);
     } catch (e) {
       console.error(e);
     }
@@ -891,622 +897,733 @@ Hard rules:
 
   function handleResetPost() {
     setPrompt("");
-    setCaption(null);
+    setCaptions([]);
     setImageUrl(null);
     setLastPromptLabel(null);
     setError(null);
-    setCopied(false);
+    setCopiedIndex(null);
   }
 
-  // If no user logged in
-if (!user) {
+  // --------------------------------------------
+  // Render
+  // --------------------------------------------
+  const isAuthed = !!user;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-slate-900 rounded-3xl p-6 border border-slate-700 space-y-4">
-        <h1 className="text-xl font-semibold text-center">
-          Brand Content Studio
-        </h1>
-        <p className="text-sm text-slate-400 text-center">
-          Enter your email to create your account or log back in. We will send
-          you a secure magic link.
-        </p>
+    <div className="min-h-screen text-slate-900" style={{ backgroundColor: bg }}>
+      {/* Top bar */}
+      <header className="border-b border-slate-200/80 bg-white/70 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+          <Link href="/" className="flex items-center gap-3">
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-semibold text-white"
+              style={{ backgroundColor: accent }}
+            >
+              FS
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm font-semibold tracking-wide">
+                Flow Social
+              </div>
+              <div className="text-xs text-slate-500">Brand Studio</div>
+            </div>
+          </Link>
 
-        <form onSubmit={handleLogin} className="space-y-3">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">
-              EMAIL
-            </label>
-            <input
-              type="email"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-              placeholder="you@example.com"
-              value={authEmail}
-              onChange={(e) => {
-    setAuthEmail(e.target.value);
-    setAuthStatus(null);
-    setHasSentMagicLink(false);
-  }}
-/>
-          </div>
-          <button
-  type="submit"
-  disabled={authLoading || hasSentMagicLink}
-  className={`w-full rounded-full px-4 py-2 text-sm font-medium ${
-    authLoading || hasSentMagicLink
-      ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
-      : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-  }`}
->
-  {authLoading
-    ? "Sending magic link..."
-    : hasSentMagicLink
-    ? "Magic link sent"
-    : "Send magic link"}
-</button>
-
-        </form>
-
-        {authStatus && (
-          <p className="text-xs text-slate-300 text-center">{authStatus}</p>
-        )}
-
-        <p className="text-[11px] text-slate-500 text-center">
-          New here or already subscribed, we will email you a login link.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-
-  // Logged in view
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-4 py-10">
-      <div className="w-full max-w-3xl space-y-6">
-                {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">Brand Content Studio</h1>
-            <p className="text-sm text-slate-400">
-              Instagram ready captions and images that match your brand.
-            </p>
-          </div>
-
-          <div className="flex flex-col items-end gap-1 sm:items-end">
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          {isAuthed ? (
+            <div className="flex items-center gap-2">
               <Link
-                href="/#pricing"
-                className="inline-flex items-center justify-center rounded-full border border-emerald-500 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
+                href="/"
+                className="hidden sm:inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
               >
-                Pricing and plans
+                Back to home
               </Link>
 
               <button
                 type="button"
                 onClick={() => setShowSettings(true)}
-                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-800 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-700"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
               >
-                <span className="mr-1">Brand Settings</span>
-                <span>⚙️</span>
+                Brand Settings
               </button>
 
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-slate-900 px-3 py-2 text-[11px] sm:text-xs hover:bg-slate-800"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
               >
                 Log out
               </button>
             </div>
-
-            {/* Plan and usage line */}
-            <div className="mt-1">
-              {usageLoading && !usageInfo && (
-                <p className="text-[11px] text-slate-500">
-                  Loading your plan and usage...
-                </p>
-              )}
-              {!usageLoading && usageInfo && (
-                <p className="text-[11px] text-slate-400 text-right">
-                  {usageInfo.maxPostsPerMonth === null ? (
-                    <>
-                      Plan:{" "}
-                      {usageInfo.plan === "pro"
-                        ? "Pro"
-                        : usageInfo.plan === "studio_max"
-                        ? "Studio Max"
-                        : "Free"}
-                      {" - "}
-                      {usageInfo.postsUsedThisMonth} posts created this month
-                    </>
-                  ) : (
-                    <>
-                      Plan:{" "}
-                      {usageInfo.plan === "pro"
-                        ? "Pro"
-                        : usageInfo.plan === "studio_max"
-                        ? "Studio Max"
-                        : "Free"}
-                      {" - "}
-                      {usageInfo.postsUsedThisMonth} of{" "}
-                      {usageInfo.maxPostsPerMonth} posts used this month
-                    </>
-                  )}
-                </p>
-              )}
-            </div>
-          </div>
+          ) : (
+            <div className="text-xs text-slate-500">Private beta</div>
+          )}
         </div>
+      </header>
 
+      <main className="mx-auto max-w-6xl px-4 pb-20 pt-10">
+        {/* Auth gate panel */}
+        {!isAuthed ? (
+          <div className="mx-auto w-full max-w-md">
+            <div className={`${radius} ${card} ${border} ${shadow} p-6`}>
+              <h1 className="text-xl font-semibold">Sign in to your Studio</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                Enter your email. We will send a secure magic link.
+              </p>
 
-        {/* Stripe checkout banner */}
-        {checkoutNotice && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm flex items-start gap-2 ${
-              checkoutNotice.type === "success"
-                ? "border-emerald-500/70 bg-emerald-900/40 text-emerald-50"
-                : "border-amber-500/70 bg-amber-900/40 text-amber-50"
-            }`}
-          >
-            <span className="mt-0.5 text-lg">
-              {checkoutNotice.type === "success" ? "✅" : "⚠️"}
-            </span>
-            <div className="flex-1">
-              <p>{checkoutNotice.text}</p>
-              {checkoutNotice.type === "success" && (
-                <p className="mt-1 text-[11px] text-emerald-100/90">
-                  Your plan limits will update automatically as billing
-                  completes in the background.
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setCheckoutNotice(null)}
-              className="text-[11px] text-slate-100/80 hover:text-slate-50"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Prompt area */}
-        <div className="bg-slate-900 rounded-2xl p-4 space-y-3">
-          <label className="block text-xs font-semibold text-slate-400">
-            DESCRIBE WHAT YOU WANT TO POST
-          </label>
-          <textarea
-            className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-            rows={3}
-            placeholder="Describe the scene, clothing, setting, and vibe you want in the post..."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-          <p className="text-[11px] text-slate-500">
-            Tip: For pure product or landscape shots, add "no people in the
-            image" or set this brand to "Mostly no people" in Brand Settings.
-          </p>
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              type="button"
-              onClick={handleCreatePost}
-              disabled={isGenerating || !prompt.trim()}
-              className={`rounded-full px-4 py-2 text-sm font-medium ${
-                isGenerating || !prompt.trim()
-                  ? "bg-sky-700/40 text-slate-300 cursor-not-allowed"
-                  : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-              }`}
-            >
-              {isGenerating ? "Creating..." : "Create Post"}
-            </button>
-
-            {isGenerating && (
-              <span className="text-xs text-slate-400">
-                Generating caption and image on brand. This can take up to 60
-                seconds. Please do not refresh the page.
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="rounded-xl bg-red-900/40 border border-red-500 px-4 py-3 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Output */}
-        {(caption || imageUrl) && (
-          <div className="bg-slate-900 rounded-3xl p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {lastPromptLabel && (
-                <div className="inline-flex max-w-full rounded-full bg-emerald-500 text-slate-950 text-sm px-4 py-2">
-                  {lastPromptLabel}
-                </div>
-              )}
-
-              <div className="flex flex-wrap gap-2 ml-auto">
-                {caption && (
-                  <button
-                    type="button"
-                    onClick={handleCopyCaption}
-                    className="rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-2 text-xs"
-                  >
-                    {copied ? "Copied" : "Copy caption"}
-                  </button>
-                )}
-                {imageUrl && (
-                  <a
-                    href={imageUrl}
-                    download="brand-post.png"
-                    className="rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-2 text-xs"
-                  >
-                    Download image
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {caption && (
-              <div className="bg-slate-800 rounded-3xl px-4 py-3 text-sm leading-relaxed">
-                {caption}
-              </div>
-            )}
-
-            {imageUrl && (
-              <div className="mt-3 flex justify-center">
-                <div className="w-full max-w-md aspect-[4/5] overflow-hidden rounded-3xl">
-                  <img
-                    src={imageUrl}
-                    alt="Generated for this post"
-                    className="w-full h-full object-cover"
+              <form onSubmit={handleLogin} className="mt-5 space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-200"
+                    placeholder="you@example.com"
+                    value={authEmail}
+                    onChange={(e) => {
+                      setAuthEmail(e.target.value);
+                      setAuthStatus(null);
+                      setHasSentMagicLink(false);
+                    }}
                   />
                 </div>
+
+                <button
+                  type="submit"
+                  disabled={authLoading || hasSentMagicLink}
+                  className={`w-full rounded-full px-4 py-2.5 text-sm font-medium ${
+                    authLoading || hasSentMagicLink
+                      ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                      : "text-white"
+                  }`}
+                  style={{
+                    backgroundColor:
+                      authLoading || hasSentMagicLink ? undefined : accent,
+                  }}
+                >
+                  {authLoading
+                    ? "Sending magic link..."
+                    : hasSentMagicLink
+                    ? "Magic link sent"
+                    : "Send magic link"}
+                </button>
+              </form>
+
+              {authStatus && (
+                <p className="mt-3 text-xs text-slate-600">{authStatus}</p>
+              )}
+
+              <p className="mt-4 text-[11px] text-slate-500">
+                New here or already subscribed, we will email you a login link.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Header row */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold">Brand Studio</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Generate captions and images that match your brand.
+                </p>
+              </div>
+
+              <div className="text-right">
+                {usageLoading && !usageInfo && (
+                  <p className="text-[11px] text-slate-500">
+                    Loading your plan and usage...
+                  </p>
+                )}
+                {!usageLoading && usageInfo && (
+                  <p className="text-[11px] text-slate-500">
+                    Plan:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {usageInfo.plan === "pro"
+                        ? "Pro"
+                        : usageInfo.plan === "studio_max"
+                        ? "Studio Max"
+                        : "Free"}
+                    </span>{" "}
+                    ·{" "}
+                    {usageInfo.maxPostsPerMonth === null
+                      ? `${usageInfo.postsUsedThisMonth} posts created this month`
+                      : `${usageInfo.postsUsedThisMonth} of ${usageInfo.maxPostsPerMonth} used this month`}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Stripe checkout notice */}
+            {checkoutNotice && (
+              <div
+                className={`mt-5 ${radius} ${border} ${card} ${shadow} p-4`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className="mt-0.5 h-8 w-8 rounded-2xl flex items-center justify-center text-sm font-semibold"
+                    style={{
+                      backgroundColor:
+                        checkoutNotice.type === "success"
+                          ? "#DCFCE7"
+                          : "#FEF3C7",
+                      color:
+                        checkoutNotice.type === "success"
+                          ? "#166534"
+                          : "#92400E",
+                    }}
+                  >
+                    {checkoutNotice.type === "success" ? "✓" : "!"}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm text-slate-800">
+                      {checkoutNotice.text}
+                    </p>
+                    {checkoutNotice.type === "success" && (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Your plan limits will update automatically as billing
+                        completes.
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutNotice(null)}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* My Posts list */}
-        <section className="mt-4 border-t border-slate-800 pt-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">My recent posts</h2>
-            <button
-              type="button"
-              onClick={loadPosts}
-              className="text-xs underline underline-offset-4"
-            >
-              Refresh
-            </button>
-          </div>
+            {/* Prompt card */}
+            <section className={`mt-6 ${radius} ${card} ${border} ${shadow} p-6`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Prompt
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Describe the scene, vibe, setting, and what the post should
+                    feel like.
+                  </div>
+                </div>
 
-          {isLoadingPosts && (
-            <p className="text-sm text-slate-400">Loading posts...</p>
-          )}
+                <div className="hidden sm:flex items-center gap-2">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: accent }}
+                  />
+                  <span className="text-xs text-slate-500">Studio light</span>
+                </div>
+              </div>
 
-          {!isLoadingPosts && posts.length === 0 && (
-            <p className="text-sm text-slate-400">
-              No posts saved yet. Generate a post to see it here.
-            </p>
-          )}
+              <div className="mt-4">
+                <textarea
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-sky-200"
+                  rows={3}
+                  placeholder='Example: "Founder at a coffee shop, laptop open, warm morning light, confident tone, minimal aesthetic."'
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                />
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Tip: For pure product or landscape shots, add "no people in
+                  the image" or set People in images to Mostly no people.
+                </p>
 
-          {!isLoadingPosts && posts.length > 0 && (
-            <ul className="space-y-3">
-              {posts.map((post) => (
-                <li
-                  key={post.id}
-                  onClick={() => setSelectedPost(post)}
-                  className="flex gap-3 rounded-lg border border-slate-800 p-3 text-sm cursor-pointer hover:bg-slate-900"
-                  role="button"
-                  tabIndex={0}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCreatePost}
+                    disabled={isGenerating || !prompt.trim()}
+                    className={`rounded-full px-5 py-2.5 text-sm font-medium text-white ${
+                      isGenerating || !prompt.trim()
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:opacity-95"
+                    }`}
+                    style={{ backgroundColor: accent }}
+                  >
+                    {isGenerating ? "Generating..." : "Generate"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetPost}
+                    className="rounded-full px-5 py-2.5 text-sm font-medium border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  >
+                    Reset
+                  </button>
+
+                  {isGenerating && (
+                    <span className="text-xs text-slate-500">
+                      Generating caption and image. Please do not refresh.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* Error */}
+            {error && (
+              <div className={`mt-5 ${radius} ${border} ${card} ${shadow} p-4`}>
+                <p className="text-sm text-rose-700">{error}</p>
+              </div>
+            )}
+
+            {/* Output grid */}
+            {(captions.length > 0 || imageUrl) && (
+              <section className="mt-6 grid gap-5 lg:grid-cols-2">
+                {/* Captions */}
+                <div className={`${radius} ${card} ${border} ${shadow} p-6`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">
+                        Caption
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Three options. Copy the one that fits best.
+                      </div>
+                    </div>
+
+                    {lastPromptLabel && (
+                      <span
+                        className="hidden sm:inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold"
+                        style={{
+                          backgroundColor: "#E0F2FE",
+                          color: "#075985",
+                        }}
+                        title={lastPromptLabel}
+                      >
+                        Latest prompt
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-5 space-y-4">
+                    {(captions.length ? captions : [])
+                      .slice(0, 3)
+                      .map((c, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                                style={{
+                                  backgroundColor:
+                                    idx === 0 ? "#E0F2FE" : "#F1F5F9",
+                                  color: idx === 0 ? "#075985" : "#334155",
+                                }}
+                              >
+                                Option {idx + 1}
+                                {idx === 0 ? " · Recommended" : ""}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCaption(idx)}
+                              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              {copiedIndex === idx ? "Copied" : "Copy"}
+                            </button>
+                          </div>
+
+                          <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                            {c}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Image */}
+                <div className={`${radius} ${card} ${border} ${shadow} p-6`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">
+                        Image
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Generated in a clean studio light style.
+                      </div>
+                    </div>
+
+                    {imageUrl && (
+                      <a
+                        href={imageUrl}
+                        download="brand-post.png"
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Download
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="mt-5">
+                    <div className="w-full overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50 aspect-[4/5]">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt="Generated for this post"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center text-xs text-slate-400">
+                          Image will appear here
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3">
+                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] text-slate-600">
+                        Style: clean studio light
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Feed preview */}
+            <section className={`mt-6 ${radius} ${card} ${border} ${shadow} p-6`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Feed preview
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Quick look at how your next posts could sit together.
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500">Coming next</div>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {feedTiles.map((t, idx) => (
+                  <div
+                    key={idx}
+                    className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
+                  >
+                    <div className="aspect-square w-full">
+                      {t.src ? (
+                        <img
+                          src={t.src}
+                          alt={t.label}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-slate-400">
+                          Coming next
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* History (keep it) */}
+            <section className="mt-8">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">
+                  Recent history
+                </h2>
+                <button
+                  type="button"
+                  onClick={loadPosts}
+                  className="text-xs text-slate-600 hover:text-slate-800 underline underline-offset-4"
                 >
-                  {post.image_url && (
-                    <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md bg-slate-900">
+                  Refresh
+                </button>
+              </div>
+
+              {isLoadingPosts && (
+                <p className="text-sm text-slate-500">Loading posts...</p>
+              )}
+
+              {!isLoadingPosts && posts.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  Nothing saved yet. Generate a post to see it here.
+                </p>
+              )}
+
+              {!isLoadingPosts && posts.length > 0 && (
+                <ul className="space-y-3">
+                  {posts.map((post) => (
+                    <li
+                      key={post.id}
+                      onClick={() => setSelectedPost(post)}
+                      className={`${radius} ${card} ${border} ${shadow} p-4 cursor-pointer hover:bg-white`}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="flex gap-4">
+                        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                          {post.image_url ? (
+                            <img
+                              src={post.image_url}
+                              alt="Post thumbnail"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : null}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate">
+                            {post.caption}
+                          </p>
+                          {post.prompt_used && (
+                            <p className="mt-1 text-xs text-slate-500 truncate">
+                              Prompt: {post.prompt_used}
+                            </p>
+                          )}
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {new Date(post.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* Selected post modal */}
+            {selectedPost && (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 p-4">
+                <div
+                  className={`w-full max-w-2xl ${radius} bg-white ${border} ${shadow} p-6`}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-slate-900">
+                      Saved post
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPost(null)}
+                      className="text-sm text-slate-500 hover:text-slate-700"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {selectedPost.image_url && (
+                    <div className="mt-4 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50 aspect-[4/5] max-h-[70vh]">
                       <img
-                        src={post.image_url}
-                        alt="Generated"
+                        src={selectedPost.image_url}
+                        alt="Saved post"
                         className="h-full w-full object-cover"
                       />
                     </div>
                   )}
 
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{post.caption}</p>
-                    {post.prompt_used && (
-                      <p className="mt-1 text-xs text-slate-400">
-                        Prompt: {post.prompt_used}
-                      </p>
-                    )}
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {new Date(post.created_at).toLocaleString()}
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
+                    {selectedPost.caption}
+                  </div>
+
+                  {selectedPost.prompt_used && (
+                    <p className="mt-3 text-xs text-slate-500">
+                      Prompt used: {selectedPost.prompt_used}
                     </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                  )}
 
-        {/* Selected post modal */}
-        {selectedPost && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70">
-            <div className="w-full max-w-lg bg-slate-900 rounded-3xl p-6 space-y-4 border border-slate-700">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Saved post</h3>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPost(null)}
-                  className="text-sm text-slate-400 hover:text-slate-100"
-                >
-                  Close
-                </button>
-              </div>
-
-              {selectedPost.image_url && (
-                <div className="flex justify-center">
-                  <div className="w-full max-w-md aspect-[4/5] overflow-hidden rounded-3xl bg-slate-800">
-                    <img
-                      src={selectedPost.image_url}
-                      alt="Saved post"
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPost(null)}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCaptions([selectedPost.caption]);
+                        setImageUrl(selectedPost.image_url);
+                        setLastPromptLabel(
+                          selectedPost.prompt_used || "Loaded from saved post"
+                        );
+                        setSelectedPost(null);
+                      }}
+                      className="rounded-full px-4 py-2 text-xs font-medium text-white hover:opacity-95"
+                      style={{ backgroundColor: accent }}
+                    >
+                      Load into editor
+                    </button>
                   </div>
                 </div>
-              )}
-
-              <div className="bg-slate-800 rounded-2xl px-4 py-3 text-sm leading-relaxed">
-                {selectedPost.caption}
               </div>
+            )}
 
-              {selectedPost.prompt_used && (
-                <p className="text-xs text-slate-400">
-                  Prompt used: {selectedPost.prompt_used}
-                </p>
-              )}
-
-              <p className="text-xs text-slate-500">
-                Created {new Date(selectedPost.created_at).toLocaleString()}
-              </p>
-
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setSelectedPost(null)}
-                  className="rounded-full border border-slate-600 bg-slate-900 px-4 py-2 text-xs hover:bg-slate-800"
+            {/* Brand settings modal */}
+            {showSettings && (
+              <div className="fixed inset-0 z-50 bg-slate-950/40 flex items-center justify-center p-4 overflow-y-auto">
+                <div
+                  className={`w-full max-w-lg ${radius} bg-white ${border} ${shadow} p-6`}
                 >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCaption(selectedPost.caption);
-                    setImageUrl(selectedPost.image_url);
-                    setLastPromptLabel(
-                      selectedPost.prompt_used || "Loaded from saved post"
-                    );
-                    setSelectedPost(null);
-                  }}
-                  className="rounded-full bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs px-4 py-2"
-                >
-                  Load into editor
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-semibold text-slate-900">
+                      Brand settings
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setShowSettings(false)}
+                      className="text-sm text-slate-500 hover:text-slate-700"
+                    >
+                      Close
+                    </button>
+                  </div>
 
-        {/* Brand settings modal */}
-        {showSettings && (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="w-full max-w-lg max-h-[90vh] bg-slate-900 rounded-3xl p-6 space-y-4 border border-slate-700 overflow-y-auto">
-              {/* Sticky Header */}
-              <div className="flex items-center justify-between sticky top-0 pb-3 mb-2 bg-slate-900">
-                <h2 className="text-lg font-semibold">Brand settings</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowSettings(false)}
-                  className="text-sm text-slate-400 hover:text-slate-100"
-                >
-                  Close
-                </button>
-              </div>
-
-              <p className="text-xs text-slate-400">
-                These details are used behind the scenes so every caption and
-                image matches your brand.
-              </p>
-
-              {/* FORM FIELDS */}
-              <div className="space-y-3 text-sm">
-                {/* BRAND NAME */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    BRAND NAME
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    value={brandSettings.brandName}
-                    onChange={(e) =>
-                      updateBrandField("brandName", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* INDUSTRY */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    INDUSTRY
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    value={brandSettings.industry}
-                    onChange={(e) =>
-                      updateBrandField("industry", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* TARGET MARKET */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    TARGET MARKET
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: Young male athletes"
-                    value={brandSettings.targetMarket}
-                    onChange={(e) =>
-                      updateBrandField("targetMarket", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* BRAND COLORS AND STYLE */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    BRAND COLORS AND STYLE
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: Blue, white, black and grey"
-                    value={brandSettings.brandColorsAndStyle}
-                    onChange={(e) =>
-                      updateBrandField("brandColorsAndStyle", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* CONTENT PILLARS */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    CONTENT PILLARS
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: sustainability, performance, animal welfare"
-                    value={brandSettings.contentPillars}
-                    onChange={(e) =>
-                      updateBrandField("contentPillars", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* DEFAULT IMAGE FOCUS */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    DEFAULT IMAGE FOCUS
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="How a typical on-brand photo should look"
-                    value={brandSettings.defaultImageFocus}
-                    onChange={(e) =>
-                      updateBrandField("defaultImageFocus", e.target.value)
-                    }
-                  />
-                </div>
-
-                {/* PEOPLE IN IMAGES */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    PEOPLE IN IMAGES
-                  </label>
-                  <select
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    value={brandSettings.peopleMode}
-                    onChange={(e) =>
-                      updateBrandField(
-                        "peopleMode",
-                        e.target.value as
-                          | "auto"
-                          | "no_people"
-                          | "prefer_people"
-                      )
-                    }
-                  >
-                    <option value="auto">Auto (decide from my prompt)</option>
-                    <option value="no_people">Mostly no people</option>
-                    <option value="prefer_people">Mostly people</option>
-                  </select>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Auto uses your text to decide. "Mostly no people" forces
-                    product or scene only shots unless you clearly ask for
-                    humans. "Mostly people" leans toward including a person
-                    whenever it fits.
+                  <p className="mt-2 text-xs text-slate-500">
+                    These details guide every caption and image behind the scenes.
                   </p>
-                </div>
 
-                <hr className="border-slate-700 my-2" />
+                  <div className="mt-5 space-y-3 text-sm">
+                    {[
+                      { key: "brandName", label: "Brand name", placeholder: "" },
+                      { key: "industry", label: "Industry", placeholder: "" },
+                      {
+                        key: "targetMarket",
+                        label: "Target market",
+                        placeholder: "Example: Solo founders building SaaS",
+                      },
+                      {
+                        key: "brandColorsAndStyle",
+                        label: "Brand colors and style",
+                        placeholder: "Example: white, slate, sky accent, Apple clean",
+                      },
+                      {
+                        key: "contentPillars",
+                        label: "Content pillars",
+                        placeholder: "Example: product, workflows, growth, founder stories",
+                      },
+                      {
+                        key: "defaultImageFocus",
+                        label: "Default image focus",
+                        placeholder: "How a typical on-brand photo should look",
+                      },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">
+                          {f.label}
+                        </label>
+                        <input
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-200"
+                          placeholder={f.placeholder}
+                          value={(brandSettings as any)[f.key]}
+                          onChange={(e) =>
+                            updateBrandField(f.key as any, e.target.value as any)
+                          }
+                        />
+                      </div>
+                    ))}
 
-                {/* PRIMARY PERSONA */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    PRIMARY PERSONA
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: youth black or white male athlete"
-                    value={brandSettings.personaPrimary}
-                    onChange={(e) =>
-                      updateBrandField("personaPrimary", e.target.value)
-                    }
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">
+                        People in images
+                      </label>
+                      <select
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-200"
+                        value={brandSettings.peopleMode}
+                        onChange={(e) =>
+                          updateBrandField(
+                            "peopleMode",
+                            e.target.value as
+                              | "auto"
+                              | "no_people"
+                              | "prefer_people"
+                          )
+                        }
+                      >
+                        <option value="auto">Auto (decide from my prompt)</option>
+                        <option value="no_people">Mostly no people</option>
+                        <option value="prefer_people">Mostly people</option>
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Auto uses your prompt. Mostly no people forces product or
+                        scene shots unless you clearly ask for humans. Mostly
+                        people leans toward including a person when it fits.
+                      </p>
+                    </div>
 
-                {/* SECONDARY PERSONA */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    SECONDARY PERSONA (OPTIONAL)
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: youth black or white female athlete"
-                    value={brandSettings.personaSecondary}
-                    onChange={(e) =>
-                      updateBrandField("personaSecondary", e.target.value)
-                    }
-                  />
-                </div>
+                    <hr className="border-slate-200 my-2" />
 
-                {/* THIRD PERSONA */}
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    THIRD PERSONA (OPTIONAL)
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm"
-                    placeholder="Example: hockey coach, any gender or race"
-                    value={brandSettings.personaThird}
-                    onChange={(e) =>
-                      updateBrandField("personaThird", e.target.value)
-                    }
-                  />
+                    {[
+                      {
+                        key: "personaPrimary",
+                        label: "Primary persona",
+                        placeholder: "Example: founder, 25-40, modern, confident",
+                      },
+                      {
+                        key: "personaSecondary",
+                        label: "Secondary persona (optional)",
+                        placeholder: "Example: creator, 20-35, vibrant",
+                      },
+                      {
+                        key: "personaThird",
+                        label: "Third persona (optional)",
+                        placeholder: "Example: agency operator, 30-50",
+                      },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">
+                          {f.label}
+                        </label>
+                        <input
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-200"
+                          placeholder={f.placeholder}
+                          value={(brandSettings as any)[f.key]}
+                          onChange={(e) =>
+                            updateBrandField(f.key as any, e.target.value as any)
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between">
+                    {brandStatus ? (
+                      <span className="text-xs text-slate-500">{brandStatus}</span>
+                    ) : (
+                      <span />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleSaveBrand}
+                      disabled={brandSaving}
+                      className={`rounded-full px-5 py-2.5 text-sm font-medium text-white ${
+                        brandSaving ? "opacity-60 cursor-not-allowed" : "hover:opacity-95"
+                      }`}
+                      style={{ backgroundColor: accent }}
+                    >
+                      {brandSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 </div>
               </div>
-
-              {/* Save Button Row */}
-              <div className="pt-2 flex items-center justify-between">
-                {brandStatus && (
-                  <span className="text-xs text-slate-300">
-                    {brandStatus}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSaveBrand}
-                  disabled={brandSaving}
-                  className={`ml-auto rounded-full bg-sky-500 hover:bg-sky-400 text-slate-950 text-sm px-4 py-2 ${
-                    brandSaving ? "opacity-70 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {brandSaving ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
-      </div>
+      </main>
+
+      <footer className="border-t border-slate-200/80 bg-white/60 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-4 text-[11px] text-slate-500 sm:flex-row">
+          <span>© {new Date().getFullYear()} Flow Social</span>
+          <div className="flex items-center gap-3">
+            <Link href="/" className="hover:text-slate-700">
+              Home
+            </Link>
+            <Link href="/#pricing" className="hover:text-slate-700">
+              Pricing
+            </Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

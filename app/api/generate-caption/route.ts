@@ -15,11 +15,25 @@ type BrandSettings = {
   contentPillars?: string;
 };
 
+function safeNoEmDash(text: string) {
+  return (text || "")
+    .replace(/\u2014/g, " - ")
+    .replace(/\u2013/g, " - ")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function tryParseJson<T>(raw: string): T | null {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    // --------------------------------------------
-    // Read request body once
-    // --------------------------------------------
     const body = await req.json();
     const userPrompt: string = body.prompt || "";
     const brand: BrandSettings = body.brandSettings || {};
@@ -64,13 +78,11 @@ export async function POST(req: Request) {
     }
 
     // --------------------------------------------
-    // Caption + image prompt logic
+    // Brand context
     // --------------------------------------------
-
     const brandName = brand.brandName || "this brand";
     const industry = brand.industry || "consumer brand";
-    const targetMarket =
-      brand.targetMarket || "the brand’s ideal customers";
+    const targetMarket = brand.targetMarket || "the brand’s ideal customers";
     const brandColorsAndStyle =
       brand.brandColorsAndStyle || "clean, modern visual style";
     const contentPillars =
@@ -85,58 +97,72 @@ Content pillars: ${contentPillars}
 `.trim();
 
     const userInstruction = userPrompt.trim()
-      ? `User idea for this post: "${userPrompt.trim()}". Turn this into a concise, punchy social caption that fits the brand.`
-      : `Create a new concise social media caption and idea that fits this brand with no extra input from the user.`;
+      ? `User idea for this post: "${userPrompt.trim()}".`
+      : `No user idea provided. Create a fresh post idea that fits the brand.`;
 
-    // 1) Generate the caption
-    const captionPrompt = `
-You are a social media copywriter for a premium brand.
+    // --------------------------------------------
+    // 1) Generate 3 caption options (JSON)
+    // --------------------------------------------
+    const captionBundlePrompt = `
+You are a social media copywriter for a premium SaaS.
 
 Use the brand details below to guide every choice of tone, topic, and angle.
 
 ${brandContext}
 
-Task:
-- Write one caption only (hashtags will be added separately later).
-- Keep it succinct: maximum 5 sentences and roughly under 650 characters.
-- Format for Instagram:
-  - Start with a short hook on its own line.
-  - Use short paragraphs with blank lines between key ideas.
-  - Avoid long walls of text; keep lines tight and easy to scan.
-- Speak directly to ${targetMarket}.
-- Reflect the content pillars: ${contentPillars}.
-- Imply or support the product or brand, but do not sound like a hard ad on every line.
-- Keep it natural, human, and engaging.
-- Do not use em dashes. If you want a break in a sentence, use a comma or " - " instead.
-
+User input:
 ${userInstruction}
+
+Task:
+- Create 3 DIFFERENT caption options for Instagram.
+- Each option must be:
+  - Maximum 5 sentences
+  - Roughly under 650 characters
+  - Instagram formatting:
+    - Start with a short hook on its own line
+    - Short paragraphs with blank lines between key ideas
+    - Easy to scan, no wall of text
+- Do NOT include hashtags inside the caption text (we add them later).
+- Do NOT use em dashes. Use a comma or " - " instead.
+- Keep it natural, human, and engaging.
+- Make Option 1 the most direct, Option 2 slightly more story-driven, Option 3 slightly more playful.
+
+Return ONLY valid JSON in this exact shape:
+{
+  "captions": ["...", "...", "..."]
+}
 `.trim();
 
-    const captionResp = await client.responses.create({
+    const captionBundleResp = await client.responses.create({
       model: "gpt-4.1-mini",
-      input: captionPrompt,
+      input: captionBundlePrompt,
     });
 
-    const captionRaw =
-      (captionResp as any).output_text ||
-      (captionResp as any).output?.[0]?.content?.[0]?.text ||
-      "Could not generate caption.";
+    const captionBundleRaw =
+      (captionBundleResp as any).output_text ||
+      (captionBundleResp as any).output?.[0]?.content?.[0]?.text ||
+      "";
 
-    // Cleanup for Instagram formatting and no em dashes
-    const captionClean = captionRaw
-      // Normalize any em dash or en dash characters just in case
-      .replace(/\u2014/g, " - ")
-      .replace(/\u2013/g, " - ")
-      // Trim spaces before newlines
-      .replace(/\s+\n/g, "\n")
-      // Avoid more than two consecutive newlines
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    const parsed = tryParseJson<{ captions: string[] }>(captionBundleRaw);
+
+    let captionsBase =
+      parsed?.captions && Array.isArray(parsed.captions) ? parsed.captions : [];
+
+    // Fallback: if parse fails, treat entire output as one caption and duplicate
+    if (captionsBase.length < 3) {
+      const fallback = safeNoEmDash(captionBundleRaw) || "Could not generate caption.";
+      captionsBase = [fallback, fallback, fallback];
+    }
+
+    captionsBase = captionsBase.slice(0, 3).map((c) => safeNoEmDash(c));
 
     // --------------------------------------------
-    // 1B) Generate 3 category-specific hashtags
+    // 1B) Generate 3 hashtags PER caption and append
     // --------------------------------------------
-    const hashtagPrompt = `
+    const captionsWithTags: string[] = [];
+
+    for (const cap of captionsBase) {
+      const hashtagPrompt = `
 Based on this brand and caption, generate exactly 3 short, relevant hashtags.
 
 Rules:
@@ -144,32 +170,34 @@ Rules:
 - No brand name hashtags unless the brand is widely known.
 - Each hashtag must be simple and category-specific.
 - Return only the 3 hashtags separated by spaces on one line.
+- No em dashes.
 
 Brand:
 ${brandContext}
 
 Caption:
-"${captionClean}"
+"${cap}"
 `.trim();
 
-    const hashtagResp = await client.responses.create({
-      model: "gpt-4.1-mini",
-      input: hashtagPrompt,
-    });
+      const hashtagResp = await client.responses.create({
+        model: "gpt-4.1-mini",
+        input: hashtagPrompt,
+      });
 
-    const hashtagsRaw =
-      (hashtagResp as any).output_text ||
-      (hashtagResp as any).output?.[0]?.content?.[0]?.text ||
-      "";
+      const hashtagsRaw =
+        (hashtagResp as any).output_text ||
+        (hashtagResp as any).output?.[0]?.content?.[0]?.text ||
+        "";
 
-    const hashtags = hashtagsRaw.trim();
+      const hashtags = safeNoEmDash(hashtagsRaw).replace(/\n/g, " ").trim();
 
-    // Final caption with hashtags as last paragraph
-    const finalCaption = hashtags
-      ? `${captionClean}\n\n${hashtags}`
-      : captionClean;
+      captionsWithTags.push(hashtags ? `${cap}\n\n${hashtags}` : cap);
+    }
 
-    // 2) Generate a short image prompt that matches the caption + brand
+    // --------------------------------------------
+    // 2) Generate a short image prompt that matches the brand + the best caption
+    // Use caption 1 as the anchor
+    // --------------------------------------------
     const imagePromptPrompt = `
 You are helping create a matching photo for a social media post.
 
@@ -177,7 +205,7 @@ Brand context:
 ${brandContext}
 
 Caption:
-"${captionClean}"
+"${captionsBase[0]}"
 
 Write a single sentence that describes one realistic photo that would fit this caption and brand.
 Include:
@@ -195,12 +223,14 @@ Return only the sentence, nothing else.
       input: imagePromptPrompt,
     });
 
-    const imagePrompt =
+    const imagePromptRaw =
       (imagePromptResp as any).output_text ||
       (imagePromptResp as any).output?.[0]?.content?.[0]?.text ||
       "";
 
-    return NextResponse.json({ caption: finalCaption, imagePrompt });
+    const imagePrompt = safeNoEmDash(imagePromptRaw);
+
+    return NextResponse.json({ captions: captionsWithTags, imagePrompt });
   } catch (error: any) {
     console.error("Caption generation error:", error);
     return NextResponse.json(
