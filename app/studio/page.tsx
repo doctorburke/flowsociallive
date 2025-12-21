@@ -1461,7 +1461,7 @@ Hard rules:
 
             {/* Brand settings modal */}
             {showSettings && (
-              <div className="fixed inset-0 z-50 bg-slate-950/40 flex items-center justify-center p-4 overflow-y-auto">
+              <div className="fixed inset-0 z-50 bg-slate-950/40 flex items-start justify-center p-4 pt-10 overflow-y-auto">
                 <div
                   className={`w-full max-w-lg ${radius} bg-white ${border} ${shadow} p-6`}
                 >
